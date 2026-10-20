@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A migration from plan to cleanup</title>
+  <!-- diagram-design skill, Exoscale skin, font source: system (no network requests) -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">State machine · exo-v2v</p>
+    <h1>A migration from plan to cleanup</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 40 960 376" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lifecycle-title lifecycle-desc">
+        <title id="lifecycle-title">A migration from plan to cleanup</title>
+        <desc id="lifecycle-desc">The migration moves through planned, receiver ready, replicating and cut over states, driven by the exo-v2v commands create, sync, cutover and cleanup, with rollback available after the cutover.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="40" width="960" height="376" fill="#fafafa"/>
+<circle cx="56" cy="152.0" r="6" fill="#212121"/>
+<path d="M 62,152.0 H 92" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 216,152.0 H 268" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="224.0" y="132.0" width="40" height="12" rx="2" fill="#fafafa"/><text x="244.0" y="141.0" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CREATE</text>
+<path d="M 392,152.0 H 444" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="406.0" y="132.0" width="28" height="12" rx="2" fill="#fafafa"/><text x="420.0" y="141.0" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SYNC</text>
+<path d="M 568,152.0 H 620" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="574.0" y="132.0" width="44" height="12" rx="2" fill="#fafafa"/><text x="596.0" y="141.0" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CUTOVER</text>
+<path d="M 744,152.0 H 796" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="750.0" y="132.0" width="44" height="12" rx="2" fill="#fafafa"/><text x="772.0" y="141.0" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CLEANUP</text>
+<path d="M 488.0,120 V 92 Q 488.0,84 496.0,84 H 520.0 Q 528.0,84 528.0,92 V 116" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="474.0" y="64" width="68" height="12" rx="2" fill="#fafafa"/><text x="508.0" y="73" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SYNC --EVERY</text>
+<path d="M 684.0,184 V 256" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<rect x="692.0" y="216" width="48" height="12" rx="2" fill="#fafafa"/><text x="716.0" y="225" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ROLLBACK</text>
+<path d="M 860.0,184 V 254" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<circle cx="860.0" cy="268" r="8" fill="none" stroke="#212121" stroke-width="1.2"/>
+<circle cx="860.0" cy="268" r="5" fill="#212121"/>
+<rect x="96" y="120" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="96" y="120" width="120" height="64" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="104" y="126" width="28" height="12" rx="2" fill="none" stroke="rgba(33,33,33,0.40)" stroke-width="0.8"/>
+<text x="118.0" y="135" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">PLAN</text>
+<text x="156.0" y="156.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Planned</text>
+<text x="156.0" y="172.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">nothing created</text>
+<rect x="272" y="120" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="272" y="120" width="120" height="64" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="280" y="126" width="36" height="12" rx="2" fill="none" stroke="rgba(33,33,33,0.40)" stroke-width="0.8"/>
+<text x="298.0" y="135" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CREATE</text>
+<text x="332.0" y="156.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Receiver ready</text>
+<text x="332.0" y="172.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">agent in RAM</text>
+<rect x="448" y="120" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="448" y="120" width="120" height="64" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="456" y="126" width="28" height="12" rx="2" fill="none" stroke="rgba(33,33,33,0.40)" stroke-width="0.8"/>
+<text x="470.0" y="135" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">SYNC</text>
+<text x="508.0" y="156.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Replicating</text>
+<text x="508.0" y="172.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">source running</text>
+<rect x="624" y="120" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="624" y="120" width="120" height="64" rx="6" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<rect x="632" y="126" width="40" height="12" rx="2" fill="none" stroke="rgba(218,41,28,0.50)" stroke-width="0.8"/>
+<text x="652.0" y="135" fill="#da291c" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CUTOVER</text>
+<text x="684.0" y="156.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Cut over</text>
+<text x="684.0" y="172.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">source off</text>
+<rect x="800" y="120" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="800" y="120" width="120" height="64" rx="6" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<rect x="808" y="126" width="28" height="12" rx="2" fill="none" stroke="rgba(97,97,97,0.50)" stroke-width="0.8"/>
+<text x="822.0" y="135" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DONE</text>
+<text x="860.0" y="156.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Cleaned up</text>
+<text x="860.0" y="172.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">migration closed</text>
+<rect x="624" y="260" width="120" height="64" rx="6" fill="#fafafa"/>
+<rect x="624" y="260" width="120" height="64" rx="6" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<rect x="632" y="266" width="28" height="12" rx="2" fill="none" stroke="rgba(95,99,104,0.40)" stroke-width="0.8"/>
+<text x="646.0" y="275" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">BACK</text>
+<text x="684.0" y="296.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Rolled back</text>
+<text x="684.0" y="312.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">source on again</text>
+<text x="96" y="300" fill="#616161" font-size="14" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif">Downtime starts at cutover: shutdown, last delta, conversion, boot.</text>
+<text x="96" y="320" fill="#616161" font-size="14" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif">Measured: 2 to 9 minutes. Every step before it runs with the VM online.</text>
+<line x1="40" y1="360" x2="920" y2="360" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/>
+<text x="40" y="376" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="388" width="14" height="10" rx="2" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<text x="60" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Downtime state</text>
+<rect x="159.39999999999998" y="388" width="14" height="10" rx="2" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="179.39999999999998" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">VM online</text>
+<rect x="253.29999999999998" y="388" width="14" height="10" rx="2" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<text x="273.29999999999995" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Closed</text>
+<rect x="331.9" y="388" width="14" height="10" rx="2" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="351.9" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Source restored</text>
+<path d="M 456.4,393 H 484.4" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="492.4" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Command</text>
+<path d="M 556.1,393 H 584.1" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="592.1" y="396" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Fallback</text>
+      </svg>
+    </div>
+    <p class="caption">Each step is resumable. Rollback works until cleanup; data written on Exoscale after the cutover is not copied back.</p>
+  </div>
+</body>
+</html>

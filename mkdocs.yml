@@ -1,0 +1,50 @@
+site_name: exo-v2v
+site_description: Warm migration of VMware vSphere VMs to Exoscale
+site_url: https://retrack.github.io/exo-v2v/
+repo_url: https://github.com/retrack/exo-v2v
+repo_name: retrack/exo-v2v
+edit_uri: ""
+copyright: exo-v2v is licensed under the Apache License 2.0
+
+theme:
+  name: material
+  custom_dir: overrides
+  font: false            # system fonts: no request to Google Fonts
+  palette:
+    scheme: default
+    primary: custom
+    accent: custom
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/exoscale.css
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - How it works: concepts.md
+      - Receiver templates: receiver-templates.md
+  - Set up and run:
+      - Prerequisites: prerequisites.md
+      - IAM role: iam.md
+      - Operations runbook: OPERATIONS.md
+  - Reference:
+      - Supported operating systems: supported-os.md
+      - Limitations: limitations.md
+      - Architecture: ARCHITECTURE.md
+
+exclude_docs: |
+  diagrams/generate.py
+  diagrams/README.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+  - pymdownx.superfences

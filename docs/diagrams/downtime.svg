@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 40 960 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="downtime-title downtime-desc" id="downtime-root">
+        <title id="downtime-title">Downtime at cutover</title>
+        <desc id="downtime-desc">Measured downtime of live migrations from vSphere to Exoscale, from source shutdown until SSH or RDP answered, per guest and firmware: Ubuntu about 2 minutes, Debian 4 to 5, AlmaLinux 6 to 7, Windows Server 5 to 9.</desc>
+        <defs>
+      <style>#downtime-root { --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+      #downtime-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #downtime-root .diagram-container { width: 100%; overflow-x: auto; }
+      #downtime-root .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+      @media print {
+#downtime-root .diagram-container { overflow-x: visible; }
+}</style>
+          <marker id="downtime-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="downtime-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="downtime-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="40" width="960" height="480" fill="#fafafa"/>
+<text x="72" y="403.0" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">0 MIN</text>
+<line x1="80" y1="332.8" x2="920" y2="332.8" stroke="#212121" stroke-width="0.8" stroke-opacity="0.08"/>
+<text x="72" y="335.8" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">2 MIN</text>
+<line x1="80" y1="265.6" x2="920" y2="265.6" stroke="#212121" stroke-width="0.8" stroke-opacity="0.08"/>
+<text x="72" y="268.6" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">4 MIN</text>
+<line x1="80" y1="198.39999999999998" x2="920" y2="198.39999999999998" stroke="#212121" stroke-width="0.8" stroke-opacity="0.08"/>
+<text x="72" y="201.39999999999998" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">6 MIN</text>
+<line x1="80" y1="131.2" x2="920" y2="131.2" stroke="#212121" stroke-width="0.8" stroke-opacity="0.08"/>
+<text x="72" y="134.2" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">8 MIN</text>
+<line x1="80" y1="63.99999999999994" x2="920" y2="63.99999999999994" stroke="#212121" stroke-width="0.8" stroke-opacity="0.08"/>
+<text x="72" y="66.99999999999994" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="end">10 MIN</text>
+<line x1="80" y1="56" x2="80" y2="400" stroke="#212121" stroke-width="1" stroke-opacity="0.25"/>
+<line x1="80" y1="400" x2="920" y2="400" stroke="#212121" stroke-width="1" stroke-opacity="0.25"/>
+<rect x="108.0" y="324" width="52" height="76" fill="#fafafa"/>
+<rect x="108.0" y="324" width="52" height="76" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="134.0" y="316" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">136 S</text>
+<rect x="168.0" y="323" width="52" height="77" fill="#fafafa"/>
+<rect x="168.0" y="323" width="52" height="77" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="194.0" y="315" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">138 S</text>
+<text x="164.0" y="420" fill="#212121" font-size="11" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Ubuntu</text>
+<text x="164.0" y="434" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">24.04</text>
+<rect x="276.0" y="258" width="52" height="142" fill="#fafafa"/>
+<rect x="276.0" y="258" width="52" height="142" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="302.0" y="250" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">253 S</text>
+<rect x="336.0" y="229" width="52" height="171" fill="#fafafa"/>
+<rect x="336.0" y="229" width="52" height="171" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="362.0" y="221" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">306 S</text>
+<text x="332.0" y="420" fill="#212121" font-size="11" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Debian</text>
+<text x="332.0" y="434" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">13</text>
+<rect x="444.0" y="201" width="52" height="199" fill="#fafafa"/>
+<rect x="444.0" y="201" width="52" height="199" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="470.0" y="193" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">355 S</text>
+<rect x="504.0" y="178" width="52" height="222" fill="#fafafa"/>
+<rect x="504.0" y="178" width="52" height="222" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="530.0" y="170" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">396 S</text>
+<text x="500.0" y="420" fill="#212121" font-size="11" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">AlmaLinux</text>
+<text x="500.0" y="434" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">9</text>
+<rect x="612.0" y="218" width="52" height="182" fill="#fafafa"/>
+<rect x="612.0" y="218" width="52" height="182" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="638.0" y="210" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">325 S</text>
+<rect x="672.0" y="223" width="52" height="177" fill="#fafafa"/>
+<rect x="672.0" y="223" width="52" height="177" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="698.0" y="215" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">316 S</text>
+<text x="668.0" y="420" fill="#212121" font-size="11" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Windows Server</text>
+<text x="668.0" y="434" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">2022</text>
+<rect x="780.0" y="173" width="52" height="227" fill="#fafafa"/>
+<rect x="780.0" y="173" width="52" height="227" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="806.0" y="165" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">405 S</text>
+<rect x="840.0" y="113" width="52" height="287" fill="#fafafa"/>
+<rect x="840.0" y="113" width="52" height="287" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="866.0" y="105" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">513 S</text>
+<text x="836.0" y="420" fill="#212121" font-size="11" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Windows Server</text>
+<text x="836.0" y="434" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">2025</text>
+<line x1="40" y1="456" x2="920" y2="456" stroke="#212121" stroke-width="0.8" stroke-opacity="0.10"/>
+<text x="40" y="472" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="484" width="14" height="10" rx="2" fill="#616161" stroke="#616161" stroke-width="1" fill-opacity="0.15"/>
+<text x="60" y="492" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">BIOS</text>
+<rect x="108.4" y="484" width="14" height="10" rx="2" fill="#2f5d8c" stroke="#2f5d8c" stroke-width="1" fill-opacity="0.18"/>
+<text x="128.4" y="492" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">UEFI</text>
+      </svg>

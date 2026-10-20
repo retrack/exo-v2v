@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exo-v2v"
+dynamic = ["version"]
+description = "Warm (online) migration of VMware vSphere VMs to Exoscale"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["pyvmomi>=8.0"]
+
+[project.scripts]
+exo-v2v = "exo_v2v.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "exo_v2v.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"exo_v2v.receiver" = ["*.py", "*.sh"]

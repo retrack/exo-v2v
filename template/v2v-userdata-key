@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""v2v-userdata-key USER — install the SSH keys listed under `ssh_authorized_keys`
+in the instance's #cloud-config user-data into ~USER/.ssh/authorized_keys.
+
+The receiver template runs no cloud-init (its root filesystem lives in RAM and
+must not touch the disk): this is the one thing it needs from user-data.
+Exoscale serves user-data on the link-local metadata server; `exo` may have
+gzip-compressed it (--cloud-init-compress)."""
+import gzip
+import os
+import pwd
+import re
+import sys
+import time
+import urllib.request
+
+URLS = ["http://169.254.169.254/latest/user-data", "http://169.254.169.254/1.0/user-data"]
+KEY = re.compile(r"^\s*-\s*['\"]?((?:ssh-|ecdsa-|sk-)[^'\"\s]+\s+[A-Za-z0-9+/=]+(?:\s+[^'\"]*)?)['\"]?\s*$")
+
+
+def fetch():
+    for _ in range(60):                       # metadata answers once DHCP is up
+        for url in URLS:
+            try:
+                with urllib.request.urlopen(url, timeout=5) as r:
+                    data = r.read()
+                if data[:2] == b"\x1f\x8b":
+                    data = gzip.decompress(data)
+                return data.decode("utf-8", "replace")
+            except OSError:
+                continue
+        time.sleep(5)
+    sys.exit("v2v-userdata-key: no user-data from the metadata server")
+
+
+def keys(text):
+    out, inside = [], False
+    for line in text.splitlines():
+        if re.match(r"^ssh_authorized_keys\s*:", line):
+            inside = True
+            continue
+        if inside:
+            m = KEY.match(line)
+            if m:
+                out.append(m.group(1).strip())
+            elif line.strip() and not line.startswith((" ", "\t", "-")):
+                inside = False
+    return out
+
+
+def main():
+    user = sys.argv[1] if len(sys.argv) > 1 else "v2v"
+    found = keys(fetch())
+    if not found:
+        sys.exit("v2v-userdata-key: no ssh_authorized_keys in user-data")
+    pw = pwd.getpwnam(user)
+    d = os.path.join(pw.pw_dir, ".ssh")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    path = os.path.join(d, "authorized_keys")
+    with open(path, "w") as f:
+        f.write("\n".join(found) + "\n")
+    for p in (d, path):
+        os.chown(p, pw.pw_uid, pw.pw_gid)
+    os.chmod(path, 0o600)
+    print(f"v2v-userdata-key: {len(found)} key(s) for {user}")
+
+
+if __name__ == "__main__":
+    main()
