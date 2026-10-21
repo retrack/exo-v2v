@@ -3,15 +3,19 @@ and the agent payload (tar.gz) that `create` streams over SSH, plus the command
 that starts the bootstrap (builds the RAM root and kexecs)."""
 import base64
 import io
+import json
 import os
 import tarfile
 
-PAYLOAD_FILES = ["agent.py", "guestfix.py", "nbdserve.py", "nbdproto.py", "cbtsim.py",
+PAYLOAD_FILES = ["agent.py", "guestfix.py", "lvmlayout.py", "nbdserve.py", "nbdproto.py", "cbtsim.py",
                  "bootstrap-kexec.sh", "win-support.sh"]
 RECEIVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "receiver")
 
 
-def payload_b64():
+def payload_b64(folds=(), volumes=None):
+    """The receiver payload. `folds` ([{"export", "offset", "size"}], disks
+    replicated into regions of the system disk) goes along as folds.json,
+    `volumes` ({export: volume serial}) as volumes.json."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for f in PAYLOAD_FILES:
@@ -20,11 +24,17 @@ def payload_b64():
             ti.uname = ti.gname = "root"
             with open(os.path.join(RECEIVER_DIR, f), "rb") as fh:
                 tar.addfile(ti, fh)
+        for name, obj in (("folds.json", list(folds)), ("volumes.json", volumes)):
+            if obj:
+                data = json.dumps(obj).encode()
+                ti = tarfile.TarInfo(name)
+                ti.size, ti.mode = len(data), 0o644
+                tar.addfile(ti, io.BytesIO(data))
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def payload_tgz():
-    return base64.b64decode(payload_b64())
+def payload_tgz(folds=(), volumes=None):
+    return base64.b64decode(payload_b64(folds, volumes))
 
 
 def build(pubkey):

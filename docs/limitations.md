@@ -1,15 +1,19 @@
 # Limitations
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
-Known limits of exo-v2v 0.1.0. `exo-v2v plan` reports the ones it can detect
+Known limits of exo-v2v 0.2.0. `exo-v2v plan` reports the ones it can detect
 before anything is created.
 
 ## Source VM
 
 | Limit | Details |
 |---|---|
-| At most 6 disks | 1 root disk and 5 Block Storage volumes: the most an Exoscale instance can attach |
+| At most 5 data disks as volumes | An Exoscale instance attaches up to 5 Block Storage volumes next to its root disk. Disks carried inside the root disk (`--fold`, automatic for a disk that shares a filesystem with the system disk) do not count. A volume rebuild at cutover needs a free slot per rebuilt volume. |
+| System disk | Found from the boot order or VMware Tools; `plan` warns when it had to guess (run it with the VM on and Tools running, or pass `--system-disk`) |
+| Snapshot chains | Supported. A revert to a snapshot during replication makes the next cycle a full copy of the allocated areas |
+| Disk changes during replication | A grown disk is followed (volume resized; a grown system disk resets the target instance, whose root disk is then copied again), a new disk gets a new volume, a removed disk stops `sync` |
+| Windows dynamic disks and Storage Spaces | Not supported on data disks: their metadata counts 512-byte sectors. The disks are detected and left untouched; their volumes stay unreadable on Exoscale. Convert them to basic disks first (a spanned or striped volume must be copied to a basic volume). `plan` warns when VMware Tools show a volume spread over several disks. |
 | No independent disks or RDMs | Independent disks are left out of snapshots, so changes cannot be tracked. Raw device mappings are not VMDK files. |
 | Root disk of 10 GB or more | Smaller disks are rounded up to 10 GB |
 | Disk sizes rounded up | Each disk becomes the next whole GB; volumes get at least 1 MiB extra |
@@ -28,7 +32,8 @@ exo-v2v adapts data volumes at cutover, with these limits:
 | Partition tables (GPT, MBR) | Rewritten in place. Partitions must start on a 4 KiB boundary, which is the default for every current installer. |
 | NTFS (Windows) | Adapted in place, no data moved. The volume must use clusters of 4 KiB or more (the default). |
 | XFS created with 512-byte sectors (RHEL-family default on VMware), ext with 1 KiB blocks | Rebuilt on a new volume with the same identifiers. The cutover takes longer in proportion to the data on these volumes. The original volume is kept, detached, as a rollback copy until `cleanup --delete-rollback-volumes`. |
-| The same filesystems inside LVM on a data volume | Reported, not rebuilt: the volume will not mount. Move the data to the root disk, or recreate the logical volume with 4 KiB sectors, before migrating. |
+| The same filesystems inside LVM logical volumes | Rebuilt the same way, logical volume by logical volume. A volume group spread over several volumes is rebuilt across as many new volumes, keeping the PV, VG and LV identifiers. Linear and striped logical volumes only: thin, RAID, mirror, cache and snapshot logical volumes with such a filesystem are reported, not rebuilt. |
+| A volume group that spans the system disk and other disks | Those disks are carried inside the root disk (512-byte sectors), so nothing is rebuilt. Detected by `plan` through VMware Tools; otherwise the preflight at the first sync reports it: plan again with `--fold DISK`. |
 | Root disk | Not affected: the instance's root disk uses 512-byte sectors |
 
 ## Replication

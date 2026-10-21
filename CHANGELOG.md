@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.2.0 — 2026-10-21
+
+Experimental release: multi-disk VMs, LVM and VMDK chains.
+
+- **System disk detection.** `plan` takes the system disk from the VM's boot
+  order, then from VMware Tools (the disk holding `/boot` or `C:\`), then from
+  `bios.hddOrder`, and warns when it has to guess. 0.1.0 took the first disk in
+  alphabetical order: a VM with an NVMe, SATA or IDE disk next to its SCSI
+  system disk got the wrong root disk.
+- **Disks carried inside the root disk (`--fold`).** A disk that shares a
+  filesystem with the system disk (a root volume group extended onto another
+  VMDK) is replicated into the root disk and added as a partition at cutover,
+  so its filesystem keeps 512-byte sectors. Automatic for Linux guests when
+  VMware Tools show the shared filesystem; `--fold DISK` forces it, `--no-fold`
+  turns it off. Folded disks do not count against the 5 Block Storage volumes.
+- **LVM on Block Storage.** The receiver reads LVM metadata itself (no LVM
+  activation on the receiver). Logical volumes holding XFS with 512-byte
+  sectors or ext with 1 KiB blocks are rebuilt with 4 KiB sectors at cutover,
+  across as many new volumes as the volume group spans, keeping PV, VG, LV and
+  filesystem identifiers. Linear and striped logical volumes.
+- **VMDK chains.** VMs with snapshots replicate through their delta chain.
+  A snapshot revert during replication (CBT reset) makes the next cycle a full
+  copy of the allocated areas instead of a whole-disk copy.
+- **Disk changes during replication.** A grown data disk gets its volume
+  resized (detach, resize, attach); a grown system or folded disk resets the
+  target instance with a bigger root disk, keeping its volumes and their change
+  IDs (resumable if interrupted); a new disk gets a new volume; a removed disk
+  stops `sync`.
+- The receiver maps volumes by serial, not by device order.
+- Windows dynamic disks and Storage Spaces disks are detected, left untouched
+  and reported (their metadata counts 512-byte sectors); `plan` warns when a
+  Windows volume spans several disks.
+- IAM role: `resize-block-storage-volume` (volume resize) and `reset-instance`
+  (receiver reset) added. Update an existing `exo-v2v-appliance` role with the
+  new `docs/iam/exo-v2v-appliance-policy.json`.
+- A volume left detached by an interrupted resize is attached again by the
+  next `sync`.
+- Receivers install `dmsetup` (logical volume rebuild); receiver templates
+  built with 0.1.0 install it on demand.
+- Docs: what exo-v2v handles (capabilities), disk mapping diagram, VMDK chains.
+
 ## 0.1.0 — 2026-10-20
 
 First, experimental release.

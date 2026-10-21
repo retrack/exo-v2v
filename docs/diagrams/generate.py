@@ -437,10 +437,63 @@ def downtime():
          "AlmaLinux includes rebuilding its XFS data volume for 4 KiB sectors.", y0=40)
 
 
+# ---------------------------------------------------------------- 7. disks (mapping)
+def chain_node(x, y, w, h, layers):
+    """A source disk drawn as its snapshot chain: base at the top, the running delta last."""
+    fill, stroke, tstroke, ttext = TREAT["input"]
+    tw = lw("CHAIN", 7)
+    s = [f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{PAPER}"/>',
+         f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{fill}" stroke="{stroke}" stroke-width="1"/>',
+         f'<rect x="{x + 8}" y="{y + 6}" width="{tw}" height="12" rx="2" fill="none" stroke="{tstroke}" stroke-width="0.8"/>',
+         f'<text x="{x + 8 + tw / 2}" y="{y + 15}" fill="{ttext}" font-size="7" font-family="{MONO}" text-anchor="middle" letter-spacing="0.08em">CHAIN</text>',
+         f'<text x="{x + w / 2}" y="{y + 36}" fill="{INK}" font-size="12" font-weight="600" font-family="{SANS}" text-anchor="middle">System disk · scsi0:0</text>']
+    for i, (text, focus) in enumerate(layers):
+        ly = y + 46 + i * 26
+        s.append(f'<rect x="{x + 12}" y="{ly}" width="{w - 24}" height="20" rx="3" fill="#ffffff" '
+                 f'stroke="{ACCENT if focus else MUTED}" stroke-width="0.8"/>')
+        s.append(f'<text x="{x + w / 2}" y="{ly + 13}" fill="{INK if focus else MUTED}" font-size="8.5" '
+                 f'font-family="{MONO}" text-anchor="middle">{esc(text)}</text>')
+    return "\n".join(s)
+
+
+def disks():
+    b = []
+    b.append(zone(48, 80, 256, 416, "VSPHERE · SOURCE VM"))
+    b.append(zone(656, 80, 256, 416, "EXOSCALE · TARGET INSTANCE"))
+    # arrows first
+    b.append(path("M 280,160 H 676", "accent"))
+    b.append(label(478, 160, "READ THROUGH THE CHAIN", ACCENT))
+    b.append(path("M 280,292 H 560 Q 568,292 568,284 V 232 Q 568,224 576,224 H 676", "accent"))
+    b.append(label(420, 292, "FOLDED: SAME VOLUME GROUP", ACCENT))
+    b.append(path("M 280,372 H 676", "accent"))
+    b.append(label(478, 372, "TABLE RESCALED · XFS-512 REBUILT", ACCENT))
+    b.append(path("M 280,452 H 676", "accent"))
+    b.append(label(478, 452, "LV REBUILT · SAME UUIDS", ACCENT))
+    # nodes
+    b.append(chain_node(72, 112, 208, 128, [("app01.vmdk · base", False), ("app01-000001 · snapshot", False),
+                                             ("app01-000002 · running", True)]))
+    b.append(node(72, 264, 208, 56, "input", "DISK", "scsi1:0", "root volume group extension"))
+    b.append(node(72, 344, 208, 56, "input", "DISK", "scsi0:1", "data disk, XFS"))
+    b.append(node(72, 424, 208, 56, "input", "DISK", "nvme0:0", "data disk, LVM"))
+    b.append(node(680, 112, 208, 128, "store", "DISK", "Root disk", "512 B sectors", "system disk + folded disk"))
+    b.append(node(680, 344, 208, 56, "store", "VOL", "Block Storage volume", "4 KiB sectors"))
+    b.append(node(680, 424, 208, 56, "store", "VOL", "Block Storage volume", "4 KiB sectors"))
+    b.append(legend(528, 48, 864, [("input", "Source disk"), ("store", "Exoscale disk"), ("accent", "Replicated")]))
+    page("disks", "Disk mapping · exo-v2v", "Where each VM disk goes",
+         "A VM's system disk, read through its snapshot chain, becomes the root disk of the target instance. A disk "
+         "that extends the root volume group is carried inside the root disk as an extra partition. The other disks "
+         "become Block Storage volumes with 4 KiB sectors, their partition tables rescaled and 512-byte-sector "
+         "filesystems or logical volumes rebuilt.",
+         960, 600, "\n".join(b),
+         "Each cycle reads a disk as the VM sees it, through the whole snapshot chain. The root disk keeps 512-byte "
+         "sectors, Block Storage volumes have 4 KiB sectors.", y0=56)
+
+
 architecture()
 lifecycle()
 replication()
 cutover()
 create_template()
 downtime()
+disks()
 print("written:", ", ".join(p.name for p in sorted(OUT.glob("*.html"))))

@@ -46,7 +46,7 @@ PKGS=(
   linux-image-virtual systemd systemd-sysv systemd-resolved udev kmod dbus
   openssh-server sudo iproute2 curl ca-certificates python3
   virt-v2v libguestfs-tools libguestfs-xfs qemu-utils qemu-system-x86
-  xfsprogs xfsdump e2fsprogs ntfs-3g dosfstools gdisk rsync cpio zstd xz-utils
+  xfsprogs xfsdump e2fsprogs ntfs-3g dosfstools gdisk rsync cpio zstd xz-utils dmsetup
 )
 
 echo "== 1. root filesystem ($SUITE)"

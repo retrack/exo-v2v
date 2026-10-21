@@ -28,7 +28,7 @@ APT="apt-get -o DPkg::Lock::Timeout=900"
 echo "kexec-tools kexec-tools/load_kexec boolean false" | debconf-set-selections
 $APT update
 $APT install -y --no-install-recommends kexec-tools zstd cpio rsync python3 \
-  openssh-server qemu-utils virt-v2v libguestfs-tools xfsprogs xfsdump e2fsprogs gdisk
+  openssh-server qemu-utils virt-v2v libguestfs-tools xfsprogs xfsdump e2fsprogs gdisk dmsetup
 command -v virt-v2v-in-place || echo "WARN: virt-v2v-in-place missing; conversion step will fail (use the Fedora agent image)"
 
 # 2. Wait for the data volumes the orchestrator attaches after creation.

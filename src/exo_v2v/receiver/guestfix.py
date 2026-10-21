@@ -28,12 +28,21 @@ import sys
 import tempfile
 import zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # also under python3 -I
+import lvmlayout as L  # noqa: E402
+
 SRC_SECTOR = 512
 # Microsoft Reserved Partition: Windows puts it at LBA 34 (not 4 KiB aligned).
 # It carries no data on basic disks, so it may be realigned (start rounded up,
 # end rounded down) - the only partition type rescale is allowed to shrink.
 import uuid as _uuid
 MSR_TYPE = _uuid.UUID("E3C9E316-0B5C-4DB8-817D-F92DF00215AE").bytes_le
+# Windows disks whose own metadata addresses 512-byte sectors: dynamic disks
+# (LDM database) and Storage Spaces. Left untouched on a 4Kn volume, reported.
+WIN_FOREIGN = {_uuid.UUID("5808C8AA-7E8F-42E0-85D2-E1E90434CFB3").bytes_le: "Windows dynamic disk (LDM)",
+               _uuid.UUID("AF9B60A0-1431-4F62-BC68-3311714A69AD").bytes_le: "Windows dynamic disk (LDM)",
+               _uuid.UUID("E75CAF8F-F680-4CEE-AFA3-B001E56EFC2D").bytes_le: "Windows Storage Spaces disk"}
+MBR_LDM = 0x42
 GPT_SIG = b"EFI PART"
 EXTENDED_TYPES = {0x05, 0x0F, 0x85}
 
@@ -116,7 +125,8 @@ def read_gpt(dev, ss):
         e = raw[i * ent_sz:(i + 1) * ent_sz]
         if e[:16] != b"\x00" * 16:
             first, last = struct.unpack_from("<QQ", e, 32)
-            parts.append({"index": i, "first": first, "last": last, "msr": e[:16] == MSR_TYPE})
+            parts.append({"index": i, "first": first, "last": last, "msr": e[:16] == MSR_TYPE,
+                          "foreign": WIN_FOREIGN.get(bytes(e[:16]))})
     return {"rev": rev, "hsz": hsz, "disk_guid": disk_guid, "n_ent": n_ent,
             "ent_sz": ent_sz, "entries": bytearray(raw), "parts": parts,
             "first_usable": first_u, "last_usable": last_u}
@@ -183,6 +193,18 @@ def analyze(dev):
         rep["problems"].append("protective MBR but no GPT header at 512 or 4096")
     if kind == "mbr" and any(p["type"] in EXTENDED_TYPES for p in table["parts"]):
         rep["problems"].append("MBR extended/logical partitions are not rescaled")
+    foreign = sorted({p["foreign"] for p in table["parts"] if p.get("foreign")} if kind == "gpt" else
+                     {"Windows dynamic disk (LDM)"} if kind == "mbr" and any(p["type"] == MBR_LDM
+                                                                             for p in table["parts"]) else set())
+    if foreign:
+        # its metadata counts 512-byte sectors: rewriting the partition table or
+        # an NTFS boot sector would not make it readable - leave the volume as it is
+        rep.update(foreign=foreign[0], needs_rescale=False, compatible=False)
+        if lbs == 4096:
+            rep["problems"].append(f"{foreign[0]}: its metadata addresses 512-byte sectors and cannot be "
+                                   "moved to a 4Kn volume; left untouched (convert to a basic disk before "
+                                   "migrating; a spanned or striped volume must be copied to a basic volume)")
+        return rep
     places = partition_offsets(kind, ss, table) if kind in ("gpt", "mbr") else [(0, 0, dev_size(dev))]
     msr = {p["index"] + 1 for p in table["parts"] if p.get("msr")} if kind == "gpt" else set()
     for num, off, size in places:
@@ -303,6 +325,8 @@ def _fix_ntfs(dev, rep, cur):
 def adapt(dev):
     rep = analyze(dev)
     rep["action"] = "none"
+    if rep.get("foreign"):
+        return rep
     if not rep["needs_rescale"]:
         if rep["logical_block_size"] == 4096:
             after = _fix_ntfs(dev, rep, rep)
@@ -376,6 +400,17 @@ def _run(cmd, **kw):
     return r.stdout
 
 
+def _need(cmd, pkg):
+    """A tool the receiver may lack (an older receiver template): install it."""
+    if subprocess.call(["which", cmd], stdout=subprocess.DEVNULL) == 0:
+        return
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    for step in (["apt-get", "update", "-q"], ["apt-get", "install", "-y", "-q", "--no-install-recommends", pkg]):
+        subprocess.call(step, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if subprocess.call(["which", cmd], stdout=subprocess.DEVNULL):
+        raise RuntimeError(f"{cmd} is missing on the receiver (apt-get install {pkg} failed)")
+
+
 def _loop512(dev, off, size):
     """Read-only 512-sector view of a byte range of a 4Kn device (mountable XFS-512)."""
     return _run(["losetup", "-f", "--show", "-r", "--sector-size", "512",
@@ -387,17 +422,27 @@ def _blkid(dev):
     return dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
 
 
-def _copy_range(src, dst, off, size, chunk=8 << 20):
-    """Byte copy of [off, off+size) skipping all-zero chunks (dst is a fresh volume)."""
+def _copy_range(src, dst, off, size, chunk=8 << 20, skip=()):
+    """Byte copy of [off, off+size) skipping all-zero chunks (dst is a fresh volume)
+    and the byte ranges in `skip` [(offset, length)] (rebuilt separately)."""
+    todo, pos = [], off
+    for s, n in sorted((s, n) for s, n in skip if s < off + size and s + n > off):
+        if s > pos:
+            todo.append((pos, s - pos))
+        pos = max(pos, s + n)
+    if pos < off + size:
+        todo.append((pos, off + size - pos))
     fi, fo = os.open(src, os.O_RDONLY), os.open(dst, os.O_WRONLY)
     try:
-        pos, zero = 0, bytes(chunk)
-        while pos < size:
-            n = min(chunk, size - pos)
-            b = os.pread(fi, n, off + pos)
-            if b != zero[:len(b)]:
-                os.pwrite(fo, b, off + pos)
-            pos += n
+        zero = bytes(chunk)
+        for start, length in todo:
+            p = 0
+            while p < length:
+                n = min(chunk, length - p)
+                b = os.pread(fi, n, start + p)
+                if b != zero[:len(b)]:
+                    os.pwrite(fo, b, start + p)
+                p += n
         os.fsync(fo)
     finally:
         os.close(fi); os.close(fo)
@@ -408,81 +453,369 @@ def _part_dev(dev, num):
     return f"{base}p{num}" if base[-1].isdigit() else f"{base}{num}"
 
 
-def relayout(src, spare, workdir="/run/v2v-relayout"):
-    """Rebuild `src` (a 4Kn data volume holding 512-sector-only filesystems) onto
-    the empty same-size 4Kn volume `spare`. Compatible partitions are copied
-    byte-for-byte; XFS sectsz<4096 and ext block<4096 are recreated with 4K
-    sectors/blocks and the SAME UUID/label, then filled (xfsdump|xfsrestore for
-    XFS, rsync -aAXHS otherwise). Partition table (incl. PARTUUIDs) is copied and
-    rescaled. Returns a report; `src` is never written."""
-    if dev_size(spare) < dev_size(src):
-        raise ValueError("spare volume is smaller than the source")
-    if logical_block_size(spare) != 4096:
-        raise ValueError("spare is not a 4Kn device")
-    rep = analyze(src)
-    kind, ss, table = layout(src)
-    places = partition_offsets(kind, ss, table) if kind in ("gpt", "mbr") else [(0, 0, dev_size(src))]
-    # only filesystems we can recreate faithfully; anything else (NTFS, LVM
-    # contents, unknown) is refused BEFORE the spare is touched
-    unsupported = [f for f in rep["filesystems"] if not f["ok_on_4kn"] and f["type"] not in REBUILDABLE]
-    if unsupported:
-        raise ValueError("cannot rebuild " + ", ".join(f"partition {f['partition']} ({f['type']} {f['detail']})"
-                                                      for f in unsupported))
-    steps = []
+def rebuild_fs(old, new, fstype, workdir="/run/v2v-relayout"):
+    """Recreate the filesystem of `old` (a 512-sector view) on `new` with 4 KiB
+    sectors/blocks and the SAME UUID/label, then copy the files (xfsdump|xfsrestore
+    for XFS, rsync -aAXHS otherwise). `old` is mounted read-only."""
     os.makedirs(f"{workdir}/src", exist_ok=True); os.makedirs(f"{workdir}/dst", exist_ok=True)
-    if kind in ("gpt", "mbr"):
-        # table region + tail (backup GPT) byte-for-byte, then rescale on the spare
-        first = min(off for _n, off, _s in places)
-        end = max(off + size for _n, off, size in places)
-        _copy_range(src, spare, 0, first)
-        if dev_size(src) > end:
-            _copy_range(src, spare, end, dev_size(src) - end)
-        a = adapt(spare)
-        steps.append({"table": a["action"]})
-        subprocess.call(["udevadm", "settle"])
-    for (num, off, size), fs in zip(places, rep["filesystems"]):
-        dst = spare if num == 0 else _part_dev(spare, num)
-        if fs["ok_on_4kn"]:
-            _copy_range(src, spare, off, size)
-            steps.append({"partition": num, "type": fs["type"], "method": "block copy"})
-            continue
-        loop = _loop512(src, off, size)
+    ids = _blkid(old)
+    uuid, label = ids.get("UUID", ""), ids.get("LABEL", "")
+    if fstype == "xfs":
+        cmd = ["mkfs.xfs", "-f", "-s", "size=4096"] + (["-m", f"uuid={uuid}"] if uuid else []) + \
+              (["-L", label] if label else []) + [new]
+    else:
+        cmd = ["mkfs.ext4", "-F", "-q", "-b", "4096"] + (["-U", uuid] if uuid else []) + \
+              (["-L", label] if label else []) + [new]
+    _run(cmd)
+    # XFS: norecovery (ro view, a dirty log cannot be replayed) + nouuid
+    # (the new fs carries the same UUID); ext: noload skips the journal.
+    opts = "ro,norecovery,nouuid" if fstype == "xfs" else "ro,noload"
+    _run(["mount", "-o", opts, old, f"{workdir}/src"])
+    try:
+        _run(["mount", "-o", "nouuid" if fstype == "xfs" else "defaults", new, f"{workdir}/dst"])
         try:
-            ids = _blkid(loop)
-            uuid, label = ids.get("UUID", ""), ids.get("LABEL", "")
-            if fs["type"] == "xfs":
-                cmd = ["mkfs.xfs", "-f", "-s", "size=4096"] + (["-m", f"uuid={uuid}"] if uuid else []) + \
-                      (["-L", label] if label else []) + [dst]
+            if fstype == "xfs" and subprocess.call(["which", "xfsdump"], stdout=subprocess.DEVNULL) == 0:
+                _run(["sh", "-c", f"xfsdump -q -J -l 0 - {workdir}/src | xfsrestore -q -J - {workdir}/dst"])
+                method = "mkfs.xfs 4K + xfsdump|xfsrestore"
             else:
-                cmd = ["mkfs.ext4", "-F", "-q", "-b", "4096"] + (["-U", uuid] if uuid else []) + \
-                      (["-L", label] if label else []) + [dst]
-            _run(cmd)
-            # XFS: norecovery (ro loop, a dirty log cannot be replayed) + nouuid
-            # (the new fs carries the same UUID); ext: noload skips the journal.
-            opts = "ro,norecovery,nouuid" if fs["type"] == "xfs" else "ro,noload"
-            _run(["mount", "-o", opts, loop, f"{workdir}/src"])
-            try:
-                _run(["mount", "-o", "nouuid" if fs["type"] == "xfs" else "defaults", dst, f"{workdir}/dst"])
-                try:
-                    if fs["type"] == "xfs" and subprocess.call(["which", "xfsdump"], stdout=subprocess.DEVNULL) == 0:
-                        _run(["sh", "-c", f"xfsdump -q -J -l 0 - {workdir}/src | xfsrestore -q -J - {workdir}/dst"])
-                        method = "mkfs.xfs 4K + xfsdump|xfsrestore"
-                    else:
-                        _run(["rsync", "-aAXHS", "--numeric-ids", f"{workdir}/src/", f"{workdir}/dst/"])
-                        method = f"mkfs 4K + rsync"
-                    used = _run(["df", "--output=used", "-B1", f"{workdir}/src"]).split()[-1]
-                finally:
-                    _run(["umount", f"{workdir}/dst"])
-            finally:
-                _run(["umount", f"{workdir}/src"])
+                _run(["rsync", "-aAXHS", "--numeric-ids", f"{workdir}/src/", f"{workdir}/dst/"])
+                method = "mkfs 4K + rsync"
+            used = _run(["df", "--output=used", "-B1", f"{workdir}/src"]).split()[-1]
         finally:
-            subprocess.call(["losetup", "-d", loop])
-        steps.append({"partition": num, "type": fs["type"], "detail": fs["detail"], "method": method,
-                      "uuid": uuid, "label": label, "bytes_used": int(used)})
+            _run(["umount", f"{workdir}/dst"])
+    finally:
+        _run(["umount", f"{workdir}/src"])
+    return {"method": method, "uuid": uuid, "label": label, "bytes_used": int(used)}
+
+
+def relayout(src, spare, workdir="/run/v2v-relayout"):
+    """One volume: see relayout_group."""
+    return relayout_group({src: spare}, workdir=workdir)[src]
+
+
+def relayout_group(pairs, others=(), workdir="/run/v2v-relayout"):
+    """Rebuild 4Kn data volumes holding 512-sector-only filesystems onto empty
+    4Kn spare volumes of the same size (pairs: {src: spare}). A volume group with
+    PVs on several of the volumes is rebuilt across them together.
+    - Partition table (incl. PARTUUIDs) copied, then rescaled.
+    - Compatible partitions and PVs copied byte-for-byte (so VG/PV/LV UUIDs and
+      the extent layout stay as they are).
+    - XFS sectsz<4096 / ext block<4096, as a partition or a logical volume:
+      recreated with 4K sectors and the SAME UUID/label, then filled from a
+      read-only 512-sector view of the source (rebuild_fs).
+    `others`: devices that are not rebuilt but may hold PVs of the same VGs (the
+    root disk); a VG with a PV there is refused (it must be folded instead).
+    Returns {src: report}; the sources are never written."""
+    for src, spare in pairs.items():
+        if dev_size(spare) < dev_size(src):
+            raise ValueError(f"spare {spare} is smaller than {src}")
+        if logical_block_size(spare) != 4096:
+            raise ValueError(f"spare {spare} is not a 4Kn device")
+    lv = lvm_analyze(list(pairs) + list(others))
+    reps, plan_ = {}, {}
+    for src in pairs:
+        rep = analyze(src)
+        kind, ss, table = layout(src)
+        places = partition_offsets(kind, ss, table) if kind in ("gpt", "mbr") else [(0, 0, dev_size(src))]
+        # only filesystems we can recreate faithfully; anything else (NTFS, LVs
+        # of other types, unknown) is refused BEFORE any spare is touched
+        bad = [f for f in rep["filesystems"] if not f["ok_on_4kn"] and f["type"] not in REBUILDABLE]
+        bad += lv["unfixable"].get(src, [])
+        if bad:
+            raise ValueError(f"{src}: cannot rebuild " + ", ".join(
+                f"partition {f['partition']} ({f['type']} {f['detail']})" if isinstance(f, dict) else f for f in bad))
+        reps[src], plan_[src] = rep, (kind, places)
+    rebuild_lvs = [x for x in lv["lvs"] if x["rebuild"] and set(x["devs"]) & set(pairs)]
+    for x in rebuild_lvs:
+        if not set(x["devs"]) <= set(pairs):
+            raise ValueError(f"LV {x['vg']}/{x['lv']} also uses {sorted(set(x['devs']) - set(pairs))}: "
+                             "rebuild those volumes in the same group")
+    skip = {src: [] for src in pairs}
+    for x in rebuild_lvs:
+        for dev, off, n in x["extents"]:
+            skip[dev].append((off, n))
+    out = {}
+    for src, spare in pairs.items():
+        kind, places = plan_[src]
+        rep, steps = reps[src], []
+        if kind in ("gpt", "mbr"):
+            # table region + tail (backup GPT) byte-for-byte, then rescale on the spare
+            first = min(off for _n, off, _s in places)
+            end = max(off + size for _n, off, size in places)
+            _copy_range(src, spare, 0, first)
+            if dev_size(src) > end:
+                _copy_range(src, spare, end, dev_size(src) - end)
+            a = adapt(spare)
+            steps.append({"table": a["action"]})
+            subprocess.call(["udevadm", "settle"])
+        for (num, off, size), fs in zip(places, rep["filesystems"]):
+            dst = spare if num == 0 else _part_dev(spare, num)
+            if fs["ok_on_4kn"]:
+                _copy_range(src, spare, off, size, skip=skip[src])
+                steps.append({"partition": num, "type": fs["type"],
+                              "method": "block copy" + (" (PV: header + kept LVs)" if fs["type"] == "lvm2-pv" else "")})
+                continue
+            loop = _loop512(src, off, size)
+            try:
+                steps.append({"partition": num, "type": fs["type"], "detail": fs["detail"],
+                              **rebuild_fs(loop, dst, fs["type"], workdir)})
+            finally:
+                subprocess.call(["losetup", "-d", loop])
+        out[src] = {"src": src, "spare": spare, "steps": steps}
+    # logical volumes: old = dm over read-only 512-sector loop views of the
+    # sources, new = dm over the spares (same offsets: same table, same PVs)
+    if rebuild_lvs:
+        _need("dmsetup", "dmsetup")
+    loops = {}
+    try:
+        for src in {d for x in rebuild_lvs for d in x["devs"]}:
+            loops[src] = _run(["losetup", "-f", "--show", "-r", "--sector-size", "512", src]).strip()
+        for i, x in enumerate(rebuild_lvs):
+            lvd = x["layout"]
+            old = L.dm_create(f"v2v-old-{i}", L.dm_table(lvd, loops), readonly=True)
+            try:
+                new = L.dm_create(f"v2v-new-{i}", L.dm_table(lvd, pairs))
+                try:
+                    r = rebuild_fs(old, new, x["fs"], workdir)
+                finally:
+                    L.dm_remove(f"v2v-new-{i}")
+            finally:
+                L.dm_remove(f"v2v-old-{i}")
+            for dev in x["devs"]:
+                out[dev]["steps"].append({"lv": f"{x['vg']}/{x['lv']}", "type": x["fs"], "detail": x["detail"], **r})
+    finally:
+        for l in loops.values():
+            subprocess.call(["losetup", "-d", l])
     _run(["sync"])
-    after = analyze(spare)
-    return {"src": src, "spare": spare, "steps": steps, "compatible": after["compatible"],
-            "problems": after["problems"], "filesystems": after["filesystems"]}
+    after_lvm = lvm_analyze(list(pairs.values()) + list(others))
+    for src, spare in pairs.items():
+        after = analyze(spare)
+        probs = after["problems"] + after_lvm["problems"].get(spare, [])
+        out[src].update(compatible=not probs, problems=probs, filesystems=after["filesystems"])
+    return out
+
+
+# ---------- fold: a source disk carried inside the system disk ----------
+#
+# A VM disk that shares a filesystem with the system disk (a root volume group
+# extended onto a second VMDK) cannot become a 4Kn Block Storage volume: the LV
+# would span 512- and 4096-byte-sector devices and a 512-only filesystem on it
+# (XFS sectsz=512, the RHEL default) no longer mounts. Such a disk is replicated
+# into a region of the instance's root disk (512-byte sectors) instead, and at
+# cutover its partitions (or the whole disk) become partitions of the root disk.
+
+GPT_LVM = _uuid.UUID("E6D6D379-F507-44C2-A23C-238F2A3DF928").bytes_le
+GPT_LINUX = _uuid.UUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4").bytes_le
+
+
+def _slice_parts(dev, off, size):
+    """Partitions of the source disk held in [off, off+size) of dev, as absolute
+    (offset, size, mbr_type, gpt_type, gpt_guid, gpt_name) - the whole region when
+    it has no partition table."""
+    loop = _run(["losetup", "-f", "--show", "-r", "-o", str(off), "--sizelimit", str(size), dev]).strip()
+    try:
+        kind, ss, table = layout(loop)
+        if kind == "gpt":
+            out = []
+            for p in table["parts"]:
+                e = table["entries"][p["index"] * table["ent_sz"]:(p["index"] + 1) * table["ent_sz"]]
+                t = bytes(e[:16])
+                out.append((off + p["first"] * ss, (p["last"] + 1 - p["first"]) * ss,
+                            0x8E if t == GPT_LVM else 0x83, t, bytes(e[16:32]), bytes(e[56:128])))
+            return out
+        if kind == "mbr":
+            return [(off + p["start"] * ss, p["count"] * ss, p["type"],
+                     GPT_LVM if p["type"] == 0x8E else GPT_LINUX, _uuid.uuid4().bytes_le, b"")
+                    for p in table["parts"] if p["type"] not in EXTENDED_TYPES]
+        fstype = probe_fs(loop, 0)[0]
+        return [(off, size, 0x8E if fstype == "lvm2-pv" else 0x83,
+                 GPT_LVM if fstype == "lvm2-pv" else GPT_LINUX, _uuid.uuid4().bytes_le, b"")]
+    finally:
+        subprocess.call(["losetup", "-d", loop])
+
+
+def _gpt_write(dev, g, ents, S=512):
+    """Write a GPT (primary + backup at the end of the device) with entries `ents`."""
+    total = dev_size(dev) // S
+    ent_bytes = g["n_ent"] * g["ent_sz"]
+    ent_secs = (ent_bytes + S - 1) // S
+    first_usable, last_usable = 2 + ent_secs, total - 2 - ent_secs
+    ent_crc = zlib.crc32(bytes(ents)) & 0xFFFFFFFF
+
+    def header(my, alt, ent_lba):
+        h = bytearray(92)
+        h[:8] = GPT_SIG
+        struct.pack_into("<IIIIQQQQ", h, 8, g["rev"], 92, 0, 0, my, alt, first_usable, last_usable)
+        h[56:72] = g["disk_guid"]
+        struct.pack_into("<QIII", h, 72, ent_lba, g["n_ent"], g["ent_sz"], ent_crc)
+        struct.pack_into("<I", h, 16, zlib.crc32(bytes(h)) & 0xFFFFFFFF)
+        return bytes(h) + b"\x00" * (S - 92)
+
+    padded = bytes(ents) + b"\x00" * (ent_secs * S - ent_bytes)
+    pwrite(dev, S, header(1, total - 1, 2))
+    pwrite(dev, 2 * S, padded)
+    pwrite(dev, (total - 1 - ent_secs) * S, padded)
+    pwrite(dev, (total - 1) * S, header(total - 1, 1, total - 1 - ent_secs))
+    return last_usable
+
+
+def fold(root, folds):
+    """Add the partitions of each folded disk (folds: [{"export", "offset",
+    "size"}], byte regions of `root`) to the root disk's partition table."""
+    if logical_block_size(root) != 512:
+        raise ValueError(f"{root} is not a 512-byte-sector disk")
+    kind, ss, table = layout(root)
+    if kind not in ("gpt", "mbr"):
+        raise ValueError(f"system disk has no partition table ({kind}): cannot fold disks into it")
+    new = []
+    for f in folds:
+        for p in _slice_parts(root, f["offset"], f["size"]):
+            if p[0] % 4096 or p[1] % 512:
+                raise ValueError(f"{f['export']}: partition at byte {p[0]} is not aligned")
+            new.append((f["export"], *p))
+    used = partition_offsets(kind, ss, table)
+    for exp, off, size, *_ in new:
+        for num, uo, us in used:
+            if off < uo + us and uo < off + size:
+                raise ValueError(f"{exp}: region overlaps partition {num} of the system disk")
+    added = []
+    if kind == "mbr":
+        raw = table["raw"]
+        free = [i for i in range(4) if not raw[446 + 16 * i + 4]]
+        if len(free) < len(new):
+            raise ValueError(f"MBR has {len(free)} free primary slots, {len(new)} needed")
+        for (exp, off, size, mtype, *_), i in zip(new, free):
+            e = bytearray(16)
+            e[1:4] = b"\xfe\xff\xff"; e[4] = mtype; e[5:8] = b"\xfe\xff\xff"
+            struct.pack_into("<II", e, 8, off // 512, size // 512)
+            raw[446 + 16 * i:446 + 16 * (i + 1)] = e
+            added.append({"export": exp, "partition": i + 1, "offset": off, "size": size, "type": hex(mtype)})
+        pwrite(root, 0, bytes(raw))
+    else:
+        if ss != 512:
+            raise ValueError("system disk GPT is not 512-byte")
+        ents = table["entries"]
+        n = table["ent_sz"]
+        free = [i for i in range(table["n_ent"]) if ents[i * n:i * n + 16] == b"\x00" * 16]
+        if len(free) < len(new):
+            raise ValueError("GPT has no free entries")
+        end = dev_size(root) // 512 - 34
+        for (exp, off, size, _mt, gtype, gguid, gname), i in zip(new, free):
+            if (off + size) // 512 - 1 > end:
+                raise ValueError(f"{exp}: region reaches the backup GPT area")
+            e = bytearray(n)
+            e[0:16] = gtype; e[16:32] = gguid
+            struct.pack_into("<QQ", e, 32, off // 512, (off + size) // 512 - 1)
+            e[56:56 + len(gname)] = gname[:n - 56]
+            ents[i * n:(i + 1) * n] = e
+            added.append({"export": exp, "partition": i + 1, "offset": off, "size": size,
+                          "type": str(_uuid.UUID(bytes_le=bytes(gtype)))})
+        _gpt_write(root, table, ents)
+    subprocess.call(["blockdev", "--rereadpt", root], stderr=subprocess.DEVNULL)
+    subprocess.call(["udevadm", "settle"])
+    return {"table": kind, "added": added}
+
+
+# ---------- LVM: volume groups across the guest's disks ----------
+
+
+def pv_places(dev):
+    """[(dev, offset, size)] of the partitions (or the whole disk) of a device."""
+    kind, ss, table = layout(dev)
+    if kind in ("gpt", "mbr"):
+        return [(dev, off, size) for _n, off, size in partition_offsets(kind, ss, table)]
+    return [(dev, 0, dev_size(dev))]
+
+
+def lvm_analyze(devs):
+    """Volume groups on `devs` and, per LV, whether it can be read where it is:
+    an LV with a 512-only filesystem (XFS sectsz<4096, ext block<4096) that
+    touches a 4Kn device cannot be mounted. Returns {"vgs", "lvs", "problems":
+    {dev: [...]}}; an LV to rebuild has rebuild=True."""
+    places = [p for d in devs for p in pv_places(d)]
+    vgs = L.scan(places)
+    lbs = {d: logical_block_size(d) for d in devs}
+    lvs, problems, unfixable = [], {}, {}
+    for vg in vgs.values():
+        pv_devs = sorted({p["dev"] for p in vg["pvs"].values() if p["dev"]})
+        mixed = len({lbs.get(d) for d in pv_devs}) > 1
+        for name, x in vg["lvs"].items():
+            item = {"vg": vg["name"], "lv": name, "types": x["types"], "devs": x["devs"], "rebuild": False,
+                    "fs": None, "detail": "", "extents": [], "layout": x}
+            lvs.append(item)
+            if not x["devs"] or all(lbs.get(d) != 4096 for d in x["devs"]):
+                continue
+            if x["segments"] is None or not x["complete"]:
+                dev, off = None, None
+            else:
+                dev, off = L.lv_start(x)
+            if dev is None:
+                fstype, ok, detail = "unknown", True, f"LV type {'/'.join(x['types'])} not inspected"
+            else:
+                fstype, ok, detail = probe_fs(dev, off)
+                item["extents"] = [(leg["dev"], leg["offset"], s["length"] // len(s["legs"]))
+                                   for s in x["segments"] for leg in s["legs"]]
+            item.update(fs=fstype, detail=detail)
+            if ok:
+                continue
+            where = ", ".join(x["devs"])
+            if mixed and any(lbs.get(d) == 512 for d in pv_devs):
+                msg = (f"LV {vg['name']}/{name} ({fstype} {detail}) spans the 512-sector system disk and 4Kn "
+                       f"volumes ({where}): cannot be mounted; fold the volumes into the system disk")
+            elif fstype in REBUILDABLE and x["segments"] is not None:
+                item["rebuild"] = True
+                msg = f"LV {vg['name']}/{name}: {fstype} {detail} cannot be mounted on 4Kn ({where}): rebuild"
+            else:
+                msg = f"LV {vg['name']}/{name}: {fstype} {detail} on 4Kn ({where}) and cannot be rebuilt"
+            for d in x["devs"]:
+                problems.setdefault(d, []).append(msg)
+                if not item["rebuild"]:
+                    unfixable.setdefault(d, []).append(msg)
+    return {"vgs": {k: {"name": v["name"], "complete": v["complete"],
+                        "pvs": {n: {kk: p[kk] for kk in ("id", "dev", "offset", "pe_start", "pe_count")}
+                                for n, p in v["pvs"].items()}} for k, v in vgs.items()},
+            "lvs": lvs, "problems": problems, "unfixable": unfixable}
+
+
+def lvm_report(devs):
+    """lvm_analyze without the internal layouts (JSON for the API)."""
+    r = lvm_analyze(devs)
+    r["lvs"] = [{k: v for k, v in x.items() if k not in ("layout", "extents")} for x in r["lvs"]]
+    return r
+
+
+def relayout_groups(exports, root="sda"):
+    """Data exports that must be rebuilt together: [[export, ...], ...] - one per
+    set of volumes linked by an LV to rebuild, plus single volumes with 512-only
+    partitions. Also returns the problems no relayout can fix."""
+    data = {k: v for k, v in exports.items() if k != root}
+    by_dev = {v: k for k, v in data.items()}
+    lv = lvm_analyze(list(exports.values()))
+    groups, unfixable = [], {}
+    for k, dev in data.items():
+        rep = analyze(dev)
+        if rep.get("foreign"):
+            unfixable.setdefault(k, []).extend(rep["problems"])
+            continue
+        if any(not f["ok_on_4kn"] and f["type"] in REBUILDABLE for f in rep["filesystems"]):
+            groups.append({k})
+        for f in rep["filesystems"]:
+            if not f["ok_on_4kn"] and f["type"] not in REBUILDABLE:
+                unfixable.setdefault(k, []).append(f"partition {f['partition']}: {f['type']} {f['detail']}")
+    for x in lv["lvs"]:
+        if x["rebuild"]:
+            groups.append({by_dev[d] for d in x["devs"] if d in by_dev})
+    for d, probs in lv["unfixable"].items():
+        if d in by_dev:
+            unfixable.setdefault(by_dev[d], []).extend(probs)
+    merged = []
+    for g in groups:                       # union of overlapping sets
+        hit = [m for m in merged if m & g]
+        for m in hit:
+            merged.remove(m)
+            g = g | m
+        merged.append(g)
+    return [sorted(g) for g in merged], unfixable
 
 
 # ---------- network fix-up (first boot, inside the guest) ----------

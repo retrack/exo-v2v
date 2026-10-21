@@ -1,6 +1,6 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.
@@ -33,18 +33,20 @@ checked `parameters.labels`, while rules on names worked.
 | 1 | Every read operation (`get-*`, `list-*`) in Compute: zones, templates, instance types, and the state of the resources above |
 | 2 | Creating `v2v-*` instances, volumes and SSH keys |
 | 3 | Deleting `v2v-*` SSH keys |
-| 4 | Starting, stopping, scaling and deleting `v2v-*` instances |
+| 4 | Starting, stopping, scaling, resetting and deleting `v2v-*` instances (reset: when the source system disk grows during replication, the target is re-imaged with a bigger root disk) |
 | 5 | Attaching a `v2v-*` volume to a `v2v-*` instance |
-| 6 | Detaching, relabelling and deleting `v2v-*` volumes |
+| 6 | Detaching, relabelling, resizing and deleting `v2v-*` volumes |
 | 7 | Creating `exo-v2v-*` security groups |
 | 8 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` security groups |
 | 9 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group`) |
 
 Everything else is denied, including every other Exoscale service. The
-operations in the rules are the ones exo-v2v 0.1.0 calls through `exo` 1.103:
-recorded during a full migration (create, sync, cutover with a volume rebuild,
-cleanup), plus the security-group attach and detach used by
-`plan --security-group` and by `cleanup` without `--delete-instance`.
+operations in the rules are the ones exo-v2v calls through `exo` 1.103:
+recorded during a full migration with 0.1.0 (create, sync, cutover with a
+volume rebuild, cleanup), plus the security-group attach and detach used by
+`plan --security-group` and by `cleanup` without `--delete-instance`. 0.2.0
+adds `resize-block-storage-volume` (a data disk that grows during replication)
+and `reset-instance` (a system disk that grows).
 
 Create the role and a key bound to it with the `exo` CLI, from an account that
 can manage IAM:

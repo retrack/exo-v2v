@@ -131,10 +131,49 @@ def flat_path(backing_file):
     return ds, path[:-5] + "-flat.vmdk"
 
 
+CTL_ORDER = ("scsi", "sata", "nvme", "ide")   # last-resort guess of the boot disk
+
+
+def guest_mounts(vm, disks):
+    """Guest filesystems -> the virtual disks behind them (VMware Tools disk
+    mappings; empty when Tools do not run or are too old). A filesystem Tools
+    list without a mapping keeps an empty list (Windows: a dynamic volume)."""
+    by_key = {d.key: k for k, d in disks.items()}
+    out = []
+    for g in getattr(vm.guest, "disk", None) or []:
+        ids = [by_key[m.key] for m in (getattr(g, "mappings", None) or []) if m.key in by_key]
+        out.append({"path": g.diskPath, "disks": ids})
+    return out if any(m["disks"] for m in out) else []
+
+
+def boot_disk(cfg, disks, mounts):
+    """(disk id, how it was found): BIOS/EFI boot order, then the disk holding the
+    guest's boot files, then bios.hddOrder, then controller order (a guess)."""
+    by_key = {d.key: k for k, d in disks.items()}
+    for b in getattr(cfg.bootOptions, "bootOrder", None) or []:
+        if isinstance(b, vim.vm.BootOptions.BootableDiskDevice) and b.deviceKey in by_key:
+            return by_key[b.deviceKey], "boot order"
+    norm = lambda p: p.rstrip("\\").lower()     # "C:\" -> "c:"
+    for want in ("/boot/efi", "/boot", "/", "C:\\"):
+        hit = next((m["disks"] for m in mounts if norm(m["path"]) == norm(want)), None)
+        if hit and len(hit) == 1:
+            return hit[0], f"guest {want}"
+    ex = {o.key.lower(): str(o.value) for o in cfg.extraConfig or []}
+    for d in (x.strip() for x in ex.get("bios.hddorder", "").split(",")):
+        if d in disks:
+            return d, "bios.hddOrder"
+    key = lambda k: (CTL_ORDER.index(k.rstrip("0123456789:")) if k.rstrip("0123456789:") in CTL_ORDER
+                     else len(CTL_ORDER), [int(x) for x in k.lstrip("abcdefghijklmnopqrstuvwxyz").split(":")])
+    return (min(disks, key=key), "controller order") if disks else (None, "")
+
+
 def inventory(vc, vm):
     cfg = vm.config
     disks = disks_of(cfg.hardware)
+    mounts = guest_mounts(vm, disks)
+    boot, boot_how = boot_disk(cfg, disks, mounts)
     return {
+        "boot_disk": boot, "boot_disk_source": boot_how, "guest_mounts": mounts,
         "name": vm.name, "power": str(vm.runtime.powerState), "guest_id": cfg.guestId,
         "guest_full": cfg.guestFullName, "firmware": cfg.firmware,
         "secure_boot": bool(getattr(cfg.bootOptions, "efiSecureBootEnabled", False)),
@@ -574,10 +613,22 @@ def sync(vc, vm, mapping, nbd_addr, api_base, full=False, final=False, shutdown_
             try:
                 ext = changed_areas(vm, snap, sd, prev)
             except CbtInactive as e:
-                # this cycle: whole-disk copy (correct, slower); CBT gets enabled for the next one
-                log(f"{d}: {e} -> whole-disk copy this cycle; enabling CBT for the next")
-                cycle.setdefault("cbt_fixups", []).append(d)
-                prev, ext = "*", [(0, sd.capacityInBytes)]
+                ext = None
+                if prev != "*":
+                    # the change ID is not valid any more: CBT was reset (a snapshot
+                    # revert, a disk extended, ...). Full copy of the allocated areas.
+                    try:
+                        ext = changed_areas(vm, snap, sd, "*")
+                        log(f"{d}: change ID {prev} no longer valid (snapshot revert? CBT reset) -> full copy")
+                        cycle.setdefault("cbt_resets", []).append(d)
+                    except CbtInactive:
+                        pass
+                if ext is None:
+                    # this cycle: whole-disk copy (correct, slower); CBT gets enabled for the next one
+                    log(f"{d}: {e} -> whole-disk copy this cycle; enabling CBT for the next")
+                    cycle.setdefault("cbt_fixups", []).append(d)
+                    ext = [(0, sd.capacityInBytes)]
+                prev = "*"
             covered = sum(n for _s, n in ext)
             ranges = coalesce(ext)
             nbd = P.Client(host, int(port), export, window=16)

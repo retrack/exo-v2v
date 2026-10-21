@@ -282,3 +282,128 @@ def test_failed_instance_create_drops_temp_ssh_key(monkeypatch):
         ex.instance_create("v2v-web", "t", "standard.small", 10, [], "ud", {"exo-v2v": "web"})
     deleted = [a[3] for a in calls if a[:3] == ("compute", "ssh-key", "delete")]
     assert deleted == ["v2v-web-1792403445"]
+
+
+# ---------------- system disk, folds, disk order ----------------
+
+def disk(id_, cap_gib, label=None):
+    return {"id": id_, "label": label or id_, "capacity": cap_gib * GiB, "file": f"[ds] vm1/{id_}.vmdk",
+            "thin": True, "change_id": None, "mode": "persistent"}
+
+
+def test_plan_system_disk_from_inventory_not_alphabetical():
+    # nvme0:0 sorts before scsi0:0: the system disk must come from the boot order / Tools
+    i = inv(disks=[disk("nvme0:0", 8), disk("scsi0:0", 40), disk("scsi0:1", 10)],
+            boot_disk="scsi0:0", boot_disk_source="boot order")
+    p = plan.build(i, "z")
+    assert [d["disk"] for d in p["disks"]] == ["scsi0:0", "scsi0:1", "nvme0:0"]
+    assert p["disks"][0]["role"] == "root" and p["root_gb"] == 40
+    assert any("from the boot order" in n for n in p["notes"])
+
+
+def test_plan_warns_when_system_disk_is_guessed():
+    i = inv(disks=[disk("sata0:0", 8), disk("scsi0:0", 40)], boot_disk="scsi0:0",
+            boot_disk_source="controller order")
+    assert any("is a guess" in w for w in plan.build(i, "z")["warnings"])
+
+
+def test_plan_folds_disks_sharing_a_filesystem_with_the_system_disk():
+    i = inv(disks=[disk("scsi0:0", 40), disk("scsi0:1", 14), disk("scsi1:0", 6), disk("scsi1:1", 3)],
+            boot_disk="scsi0:0", boot_disk_source="boot order",
+            guest_mounts=[{"path": "/", "disks": ["scsi0:0", "scsi1:0"]},
+                          {"path": "/var", "disks": ["scsi1:0", "scsi1:1"]},     # transitively
+                          {"path": "/data", "disks": ["scsi0:1"]}])
+    p = plan.build(i, "z")
+    roles = {d["disk"]: d["role"] for d in p["disks"]}
+    assert roles == {"scsi0:0": "root", "scsi0:1": "volume", "scsi1:0": "fold", "scsi1:1": "fold"}
+    f = {x["disk"]: x for x in p["folds"]}
+    assert f["scsi1:0"]["offset"] == 40 * GiB and f["scsi1:1"]["offset"] == 46 * GiB
+    assert p["root_gb"] == 50                                        # 40 + 6 + 3 + 1 MiB for a backup GPT
+    assert p["volumes_gb"] == [15]
+    assert plan.build(i, "z", auto_fold=False)["folds"] == []
+    assert [x["disk"] for x in plan.build(i, "z", auto_fold=False, fold=["scsi0:1"])["folds"]] == ["scsi0:1"]
+
+
+def test_plan_fold_allows_more_than_five_data_disks():
+    many = [disk("scsi0:0", 20)] + [disk(f"scsi1:{u}", 1) for u in range(7)]
+    i = inv(disks=many, boot_disk="scsi0:0", boot_disk_source="boot order")
+    assert any("at most 5" in e for e in plan.build(i, "z")["errors"])
+    assert not plan.build(i, "z", fold=["scsi1:5", "scsi1:6"])["errors"]
+
+
+def test_fold_layout_alignment():
+    at, gb = plan.fold_layout(10 * GiB + 512, [("a", 3 * GiB + 1), ("b", 1 << 20)])
+    assert at == [("a", 10 * GiB + (1 << 20)), ("b", 13 * GiB + (2 << 20))]
+    assert gb == 14
+
+
+# ---------------- LVM text metadata ----------------
+
+def test_lvm_parse_text():
+    import lvmlayout
+    t = '''vg1 {
+id = "abc"
+seqno = 3
+extent_size = 8192	# 4 Megabytes
+physical_volumes {
+pv0 {
+id = "pv-0"
+device = "/dev/sdc1"	# Hint only
+pe_start = 2048
+pe_count = 10
+}
+}
+logical_volumes {
+lv {
+status = ["READ", "WRITE", "VISIBLE"]
+segment_count = 1
+segment1 {
+start_extent = 0
+extent_count = 10
+type = "striped"
+stripe_count = 1	# linear
+stripes = [
+"pv0", 0
+]
+}
+}
+}
+}
+contents = "Text Format Volume Group"
+'''
+    d = lvmlayout.parse_text(t)
+    vg = d["vg1"]
+    assert vg["extent_size"] == 8192 and vg["physical_volumes"]["pv0"]["pe_start"] == 2048
+    assert vg["logical_volumes"]["lv"]["segment1"]["stripes"] == ["pv0", 0]
+    assert vg["logical_volumes"]["lv"]["status"] == ["READ", "WRITE", "VISIBLE"]
+    assert lvmlayout.dashed("0123456789abcdefghijklmnopqrstuv") == "012345-6789-abcd-efgh-ijkl-mnop-qrstuv"
+
+
+def test_plan_windows_spanned_volume_warns_and_never_folds():
+    i = inv(guest_id="windows2019srv_64Guest",
+            disks=[disk("scsi0:0", 60), disk("sata0:0", 8), disk("sata0:1", 8)],
+            boot_disk="scsi0:0", boot_disk_source="guest C:\\",
+            guest_mounts=[{"path": "C:\\", "disks": ["scsi0:0", "sata0:0"]},
+                          {"path": "E:\\", "disks": ["sata0:0", "sata0:1"]},
+                          {"path": "F:\\", "disks": []}])        # Tools cannot map a dynamic volume
+    p = plan.build(i, "z")
+    assert p["folds"] == [] and len(p["volumes_gb"]) == 2
+    assert sum("Windows dynamic volume" in w for w in p["warnings"]) == 3
+
+
+@needs_sgdisk
+def test_windows_dynamic_disk_left_untouched(tmp_path, monkeypatch):
+    img = str(tmp_path / "ldm.img")
+    with open(img, "wb") as f:
+        f.truncate(64 << 20)
+    # what diskpart's "convert dynamic" leaves on a GPT disk: LDM metadata at LBA 34
+    subprocess.run(["sgdisk", "-o", "-n", "1:34:2081", "-t", "1:5808C8AA-7E8F-42E0-85D2-E1E90434CFB3",
+                    "-n", "2:2082:+16M", "-t", "2:E3C9E316-0B5C-4DB8-817D-F92DF00215AE",
+                    "-n", "3:0:0", "-t", "3:AF9B60A0-1431-4F62-BC68-3311714A69AD", img],
+                   check=True, capture_output=True)
+    before = open(img, "rb").read()
+    monkeypatch.setenv("V2V_TEST_LBS", "4096")
+    r = guestfix.adapt(img)
+    assert r["foreign"] == "Windows dynamic disk (LDM)" and r["action"] == "none" and not r["compatible"]
+    assert any("dynamic disk" in p for p in r["problems"])
+    assert open(img, "rb").read() == before

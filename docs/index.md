@@ -1,6 +1,6 @@
 # exo-v2v
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied; it is stopped only
@@ -17,6 +17,19 @@ of the disks.
   migrated system from its own disks.
 
 No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
+
+## What it handles
+
+| Area | Supported |
+|---|---|
+| Guests | Linux (Ubuntu, Debian, RHEL family) and Windows Server 2022/2025, BIOS or UEFI, Secure Boot, vTPM ([details](supported-os.md)) |
+| Disks | Several VMDKs per VM on SCSI, SATA or NVMe controllers; the system disk is found from the boot order or VMware Tools; up to 5 data disks as Block Storage volumes |
+| **VMDK chains** | VMs running on snapshot deltas, at any depth. Snapshots may be taken, deleted or reverted during replication: a revert makes the next cycle copy the allocated areas again |
+| Disks that change | A disk grown during replication is followed (its volume is resized; a grown system disk resets the target instance); a disk added is replicated to a new volume |
+| LVM | Volume groups spread over several disks. A disk that extends the system disk's volume group is carried inside the root disk; logical volumes on data disks are rebuilt for 4 KiB sectors when their filesystem needs it, with the same UUIDs |
+| Filesystems | ext, XFS (including 512-byte-sector XFS, the RHEL default on VMware), NTFS, swap; partition tables GPT and MBR |
+| Replication | Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance |
+| Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](limitations.md)) |
 
 ## Where to start
 
@@ -37,7 +50,7 @@ On the replication appliance (a Linux VM in the same vSphere environment, with
 Python 3.10 or later and the [`exo` CLI](https://github.com/exoscale/cli)):
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.1.0/exo_v2v-0.1.0-py3-none-any.whl
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.2.0/exo_v2v-0.2.0-py3-none-any.whl
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```

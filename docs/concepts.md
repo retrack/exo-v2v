@@ -1,6 +1,6 @@
 # How exo-v2v works
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied. It is stopped only
@@ -15,7 +15,7 @@ size of the disks.
 |---|---|---|
 | **exo-v2v** (CLI) | The *replication appliance*, a small Linux VM you deploy in the same vSphere environment as the VMs to migrate | Plans the migration, creates the Exoscale resources, copies the disks, drives the cutover |
 | **Target instance** | Your Exoscale zone | The instance that will run the migrated VM. During the migration it runs a temporary agent *from memory*, so its own disks can be overwritten. It starts either from a [receiver template](receiver-templates.md) that boots straight into memory (about 1 minute) or from a stock Linux template that installs the tools first (5 to 15 minutes) |
-| **Root disk and Block Storage volumes** | Attached to the target instance | Receive the VM's disks: the first disk becomes the instance's root disk, the others become Block Storage volumes |
+| **Root disk and Block Storage volumes** | Attached to the target instance | Receive the VM's disks: the system disk becomes the instance's root disk, the others become Block Storage volumes (see [The VM's disks](#the-vms-disks)) |
 
 There is no intermediate copy: the data lands directly on the disks the
 migrated VM boots from.
@@ -30,14 +30,44 @@ use. Each *sync cycle* copies only what changed since the previous one.
 1. A short-lived VM snapshot freezes the disks at a point in time.
 2. vSphere reports which areas changed since the last cycle. The first cycle
    copies every allocated area.
-3. The frozen disk is attached **read-only** to the appliance (*hot-add*). The
-   appliance reads the changed areas and writes them to the target instance
-   through an SSH tunnel.
+3. The frozen disk is attached **read-only** to the appliance (*hot-add*),
+   together with the snapshot deltas below it when the VM already runs on a
+   chain of snapshots, so the appliance sees the disk exactly as the VM does. It
+   reads the changed areas and writes them to the target instance through an
+   SSH tunnel.
 4. The target instance records the cycle's change ID; the snapshot is deleted.
 
 No VMware software development kit (VDDK) is needed, and nothing is installed
 inside the VM. Run `exo-v2v sync NAME --every 900` to start a cycle every 15 minutes until
 your maintenance window.
+
+## The VM's disks
+
+A VM can have several virtual disks (VMDKs), on SCSI, SATA or NVMe
+controllers, and each disk can be a chain of snapshot deltas. `exo-v2v plan`
+maps each of them:
+
+![Disk mapping: the system disk, read through its snapshot chain, becomes the root disk; a disk extending the root volume group is folded into the root disk; data disks become Block Storage volumes with 4 KiB sectors](diagrams/disks.svg)
+
+| VM disk | On Exoscale |
+|---|---|
+| The system disk | The instance's root disk. exo-v2v finds it from the VM's boot order, then from VMware Tools (the disk holding `/boot` or `C:\`), then from `bios.hddOrder`. If none of these answers, `plan` warns that it guessed; `--system-disk` sets it. |
+| Other disks | One Block Storage volume each, up to 5 |
+| A disk that shares a filesystem with the system disk, such as a root volume group extended onto a second VMDK (Linux) | Carried *inside* the root disk: replicated into a region after the system disk, then added as a partition of the root disk at cutover. A 4096-byte-sector volume cannot hold part of a volume group whose filesystem only works with 512-byte sectors. `plan` detects it with VMware Tools; `--fold DISK` forces it, `--no-fold` turns it off. |
+
+Snapshots and changes during replication:
+
+- **Existing snapshots.** A VM that runs on a chain of snapshot deltas is
+  replicated as it is: each cycle reads the disks as the VM sees them. Deleting
+  snapshots during replication is fine. Reverting to a snapshot resets CBT:
+  the next cycle copies the allocated areas of every disk again.
+- **A disk grows.** The next cycle resizes its Block Storage volume (detach,
+  resize, attach) and copies the disk again. When the system disk, or a disk
+  carried inside it, grows beyond the root disk, the target instance is reset
+  with a bigger root disk and its agent restarted. Its volumes are kept, and
+  only the root disk is copied again.
+- **A disk is added.** The next cycle creates a volume for it and copies it.
+- **A disk is removed.** `sync` stops: plan the migration again.
 
 ## The migration lifecycle
 
@@ -81,7 +111,7 @@ These adjustments are automatic:
 | Difference | What exo-v2v does |
 |---|---|
 | Network interfaces get new names and MAC addresses | A first-boot service maps the old interface names in the network configuration to the new ones, removes VMware MAC pinning, and falls back to DHCP |
-| Block Storage volumes use 4096-byte sectors; VMware disks use 512 | Partition tables are rewritten for 4096-byte sectors. NTFS volumes are adapted in place. XFS and ext filesystems that only work with 512-byte sectors are rebuilt on a new volume with the same identifiers, and the original volume is kept as a rollback copy |
+| Block Storage volumes use 4096-byte sectors; VMware disks use 512 | Partition tables are rewritten for 4096-byte sectors. NTFS volumes are adapted in place. XFS and ext filesystems that only work with 512-byte sectors are rebuilt on a new volume with the same identifiers, as partitions or as LVM logical volumes (a volume group spread over several volumes is rebuilt across new ones, with the same LVM identifiers). The original volumes are kept as rollback copies |
 | Windows keeps new disks offline | A first-boot task sets the SAN policy to `OnlineAll` and brings the data disks online |
 | Secure Boot and TPM | The instance is created with Secure Boot and a TPM when the source VM has them |
 | SELinux guests | Files exo-v2v adds are labelled correctly, so no relabelling reboot is needed |

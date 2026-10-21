@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -16,6 +16,19 @@ downtime of minutes, regardless of disk size:
 No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 
 ![exo-v2v architecture](docs/diagrams/architecture.svg)
+
+## What it handles
+
+| Area | Supported |
+|---|---|
+| Guests | Linux (Ubuntu, Debian, RHEL family) and Windows Server 2022/2025, BIOS or UEFI, Secure Boot, vTPM ([details](docs/supported-os.md)) |
+| Disks | Several VMDKs per VM on SCSI, SATA or NVMe controllers; the system disk is found from the boot order or VMware Tools; up to 5 data disks as Block Storage volumes |
+| **VMDK chains** | VMs running on snapshot deltas, at any depth. Snapshots may be taken, deleted or reverted during replication: a revert makes the next cycle copy the allocated areas again |
+| Disks that change | A disk grown during replication is followed (its volume is resized; a grown system disk resets the target instance); a disk added is replicated to a new volume |
+| LVM | Volume groups spread over several disks. A disk that extends the system disk's volume group is carried inside the root disk; logical volumes on data disks are rebuilt for 4 KiB sectors when their filesystem needs it, with the same UUIDs |
+| Filesystems | ext, XFS (including 512-byte-sector XFS, the RHEL default on VMware), NTFS, swap; partition tables GPT and MBR |
+| Replication | Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance |
+| Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](docs/limitations.md)) |
 
 ## Documentation
 
@@ -39,13 +52,13 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 | vSphere | vCenter or standalone ESXi 6.7+ (tested: ESXi 7.0 U3). An account allowed to snapshot the source VM and reconfigure the appliance VM (add/remove disk). |
 | Replication appliance | A Linux VM **in the same vSphere environment**, on a host that sees the source VM's datastores (hot-add transport, the same mechanism backup products use). Python ≥ 3.10, `ssh`, the [`exo` CLI](https://github.com/exoscale/cli) ≥ 1.102, a free paravirtual SCSI slot. Runs `sync`/`cutover` as **root**. Outbound TCP 22 to Exoscale, 443 to vCenter/ESXi. |
 | Exoscale | An API key restricted to Compute (instances, Block Storage, security groups) in the `exo` CLI config (or `EXOSCALE_API_KEY`/`EXOSCALE_API_SECRET`); see [IAM role](docs/iam.md). |
-| Source VM | Linux or Windows Server ([supported operating systems](docs/supported-os.md)); BIOS or UEFI, with or without Secure Boot; ≤ 6 disks (1 root + 5 volumes); no independent/RDM disks. CBT is enabled automatically. |
+| Source VM | Linux or Windows Server ([supported operating systems](docs/supported-os.md)); BIOS or UEFI, with or without Secure Boot; disks on SCSI, SATA or NVMe controllers, up to 5 data disks as Block Storage volumes; snapshot chains are fine; no independent/RDM disks. CBT is enabled automatically. VMware Tools running at `plan` time helps it map the disks. |
 
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.1.0/exo_v2v-0.1.0-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.1.0   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.2.0/exo_v2v-0.2.0-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.2.0   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -88,7 +101,7 @@ never modified by the migration (snapshots are removed after every cycle).
 | Issue | Why | What exo-v2v does |
 |---|---|---|
 | Network config bound to VMware NIC names/MACs (`ens192`, `ens224`, HWADDR) | Debian/Ubuntu/RHEL configs name the vmxnet3 interface; on Exoscale the NIC is `ens3`/`eth0` | Installs `v2v-netfix.service` (first boot, before networking): maps stale names to present NICs in ifupdown/netplan/NetworkManager/ifcfg, drops VMware MAC pins, DHCP fallback |
-| **Block Storage volumes have 4096-byte sectors** (the root disk has 512) | Partition tables written for 512-byte sectors are invisible on 4Kn; XFS with `sectsz=512` (the RHEL default on VMware) and ext 1K-block filesystems refuse to mount; Windows shows 512-byte-sector NTFS volumes as RAW | GPT/MBR are rescaled in place (the Windows MSR at LBA 34 is realigned). **NTFS**: the boot sector geometry is rewritten for 4096-byte sectors in place — no data moves (needs ≥ 4 KiB clusters, the default); original boot sector kept for revert. **XFS-512 / ext-1K**: rebuilt onto a fresh 4K volume with the **same UUIDs, labels and partition GUIDs** (`xfsdump`/`rsync`), so `fstab` keeps working; the original volume is kept, detached, as rollback copy (adds cutover time proportional to the data). |
+| **Block Storage volumes have 4096-byte sectors** (the root disk has 512) | Partition tables written for 512-byte sectors are invisible on 4Kn; XFS with `sectsz=512` (the RHEL default on VMware) and ext 1K-block filesystems refuse to mount; Windows shows 512-byte-sector NTFS volumes as RAW | GPT/MBR are rescaled in place (the Windows MSR at LBA 34 is realigned). **NTFS**: the boot sector geometry is rewritten for 4096-byte sectors in place — no data moves (needs ≥ 4 KiB clusters, the default); original boot sector kept for revert. **XFS-512 / ext-1K**, as partitions or LVM logical volumes: rebuilt onto fresh 4K volumes with the **same UUIDs, labels and partition GUIDs** (and the same PV/VG/LV identifiers: a volume group spread over several volumes is rebuilt across new ones), so `fstab` keeps working; the original volumes are kept, detached, as rollback copies (adds cutover time proportional to the data). **A disk that shares a filesystem with the system disk** (a root volume group extended onto a second VMDK) is carried inside the root disk, which keeps 512-byte sectors. |
 | SELinux guests | injected files need labels | labelled at injection; no relabel reboot |
 | Windows: data disks come up **Offline** | Windows Server's SAN policy (`OfflineShared`) keeps "new" disks offline — after the move to virtio every data volume is new | A first-boot script (in virt-v2v's own firstboot framework) registers a SYSTEM task that sets the policy to `OnlineAll` and brings the disks online, retrying until the storage services answer, then removes itself |
 
@@ -103,17 +116,23 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 | Ubuntu 24.04 and Windows Server 2022, UEFI with Secure Boot (Secure Boot on after migration) | 2/2 | 133–455 s |
 | With receiver templates: the 6 Linux guests above, Windows Server 2022 and 2025 (BIOS and UEFI), up to 8 concurrent | 10/10 | 136–513 s |
 | Debian 13 under continuous write load (3 delta cycles) | pass | 298 s |
+| AlmaLinux 9, 4 disks on paravirtual SCSI + NVMe, XFS-512 logical volume spanning two disks (rebuilt across two new volumes), with and without a receiver template | 2/2 | 9–10 min¹ |
+| AlmaLinux 9 with its root volume group extended onto a second disk (carried inside the root disk), on a 3-level snapshot chain; during replication: snapshot deleted, snapshot reverted, data disk grown, system disk grown, disk hot-added | pass | 9 min¹ |
+
+¹ Without `--verify`; these runs used it (every disk hash-compared before conversion, about 13–15 more minutes on the lab's HDD datastore).
 
 ![Downtime at cutover per guest and firmware](docs/diagrams/downtime.svg)
 
 ## Limits
 
-- 1 root disk + up to 5 data volumes per instance; root disk ≥ 10 GB.
+- 1 root disk + up to 5 data volumes per instance; root disk ≥ 10 GB. Disks
+  carried inside the root disk (`--fold`) do not count.
 - One public NIC; extra VMware NICs → attach Exoscale Private Networks afterwards.
-- Data volumes holding XFS-512/ext-1K filesystems inside **LVM** are reported
-  but not rebuilt automatically (move them to the root disk, or recreate the LV).
 - Windows data volumes must use NTFS clusters ≥ 4 KiB (the default); smaller
-  clusters cannot be expressed in 4096-byte sectors.
+  clusters cannot be expressed in 4096-byte sectors. Windows **dynamic disks**
+  and Storage Spaces disks are not supported as data disks (detected, left
+  untouched, unreadable on Exoscale): convert them to basic disks first.
+- Disks may grow or be added during replication; a removed disk stops `sync`.
 - The receiver keeps the replica in its RAM-booted agent's state: if it reboots
   during the sync window it must be recreated (`cleanup --delete-instance`, `create`)
   and the next sync is a full copy.

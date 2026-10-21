@@ -98,6 +98,14 @@ class Exo:
     def instance_scale(self, name, itype):
         return self.run("compute", "instance", "scale", name, itype, "-z", self.zone, "-f", json_out=False)
 
+    def instance_reset(self, name, template, disk_gb, template_visibility="public"):
+        """Re-image the root disk from `template` at `disk_gb` (wipes it; volumes stay)."""
+        args = ["compute", "instance", "reset", name, "-z", self.zone, "--template", template,
+                "--disk-size", str(disk_gb), "-f"]
+        if template_visibility != "public":
+            args += ["--template-visibility", template_visibility]
+        return self.run(*args, json_out=False)
+
     def instance_delete(self, name):
         return self.run("compute", "instance", "delete", name, "-z", self.zone, "-f", json_out=False)
 
@@ -125,6 +133,11 @@ class Exo:
 
     def volume_detach(self, name):
         return self.run("compute", "block-storage", "detach", name, "-z", self.zone, "-f", json_out=False)
+
+    def volume_resize(self, name, size_gb):
+        """Grow a volume (Exoscale: only while detached)."""
+        return self.run("compute", "block-storage", "update", name, "-z", self.zone, "--size", str(size_gb),
+                        json_out=False)
 
     def volume_delete(self, name):
         return self.run("compute", "block-storage", "delete", name, "-z", self.zone, "-f", json_out=False)

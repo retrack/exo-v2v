@@ -1,6 +1,6 @@
 # Prerequisites
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 Check these before your first migration. `exo-v2v plan` checks the source VM
 for you and refuses VMs it cannot migrate.
@@ -65,6 +65,6 @@ migration's security group admits SSH from that address only.
 | Disks | At most 6 virtual disks (1 root disk and up to 5 Block Storage volumes). No independent disks, no raw device mappings (RDM). |
 | Firmware | BIOS or UEFI. The target instance uses the same boot mode, and Secure Boot and a TPM when the source has them. |
 | Changed Block Tracking | Enabled automatically by exo-v2v, without downtime |
-| VMware Tools | Recommended, so that cutover can shut the guest down cleanly. Without it, exo-v2v powers the VM off after `--shutdown-timeout`. |
+| VMware Tools | Recommended, running when you run `plan`: it tells exo-v2v which disk holds the system and which disks share a filesystem with it. At cutover it shuts the guest down cleanly; without it, exo-v2v powers the VM off after `--shutdown-timeout`. |
 | Network configuration | DHCP is recommended. A static IP configuration keeps the old address and must be updated for the Exoscale instance's address. |
 | Snapshots | Existing snapshots are allowed but consolidate them first if you can |

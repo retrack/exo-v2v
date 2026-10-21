@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -54,7 +54,12 @@ After a cutover, data written on Exoscale is **not** copied back.
 | `Another task is already in progress` | Handled (waits/retries). If persistent: a snapshot consolidation is running on the source; wait. |
 | Cutover: `conversion failed` | `exo-v2v status -v NAME`; the receiver's `/var/log/v2v-convert.log` (via `ssh -i ~/.exo-v2v/NAME/id_ed25519 USER@IP`: `v2v` on a receiver template, `debian` or `ubuntu` (UEFI) on a stock one). The source stays off: fix and re-run `cutover`, or `rollback`. |
 | Guest has no network after cutover | `/var/log/v2v-netfix.log` on the guest (portal console). Static IP configs need the new Exoscale address. |
-| Data volume not mounted after cutover | `journalctl -b -u <mount>`; a 512-only filesystem that was not relaid (inside LVM). See README *Limits*. |
+| Data volume not mounted after cutover | `journalctl -b -u <mount>`; `exo-v2v status -v NAME` and the cutover log list what was rebuilt and what was left as is (e.g. an LV type other than linear/striped). See [Limitations](limitations.md). |
+| `plan` warns that the system disk is a guess | No boot order and no VMware Tools disk mapping. Start the VM with Tools running and plan again, or pass `--system-disk scsiX:Y`. |
+| Preflight: `spans the 512-sector system disk and 4Kn volumes … fold` | A volume group spans the system disk and another disk, and `plan` could not see it (no VMware Tools mapping). `cleanup --delete-instance`, then `plan --fold DISK`, `create`, `sync`. |
+| `sync`: `the root disk must grow … resetting` | The system disk (or a folded disk) grew: the receiver is re-imaged with a bigger root disk; its volumes keep their copy. If interrupted, the next `sync` resumes it. |
+| `sync`: `disk(s) … removed from VM` | The copy no longer matches the VM. `cleanup --delete-instance`, then plan and create again. |
+| Windows: a dynamic or Storage Spaces volume is missing after cutover | Not supported on data disks (preflight reports it). Roll back, convert the disks to basic (copy spanned/striped volumes to basic ones), migrate again. |
 | Windows: D: (data) missing after cutover | First boot runs several driver-install reboots (5–10 min) before the `exo-v2v-online-disks` scheduled task onlines the disks; check `C:\ProgramData\exo-v2v\online-disks.log` and `C:\Program Files\Guestfs\Firstboot\log.txt`. Manually: `Set-Disk -Number 1 -IsOffline $false`. |
 | Windows volume shows RAW | It was formatted with < 4 KiB clusters (cannot be expressed in 4 KiB sectors); move the data or reformat with 4 KiB clusters before migrating. |
 

@@ -1,6 +1,6 @@
 # Supported operating systems
 
-> **Experimental.** exo-v2v 0.1.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v converts guests with
 [`virt-v2v-in-place`](https://libguestfs.org/virt-v2v-in-place.1.html), so it
@@ -37,6 +37,22 @@ of 5 minutes and no lost writes. Up to 8 migrations ran at the same time from
 one replication appliance. Every guest above was migrated with a [receiver
 template](receiver-templates.md); all except Windows Server 2025 also without one.
 
+### Multi-disk VMs, LVM and VMDK chains
+
+Two AlmaLinux 9 VMs (SELinux enforcing, XFS with 512-byte sectors, the RHEL
+default on VMware) were migrated live with `cutover --verify` (every disk
+hash-compared before conversion):
+
+| VM | What it had | Result |
+|---|---|---|
+| 4 disks on 3 controllers (2 paravirtual SCSI, NVMe) | Root volume group on the system disk; XFS data disk; a volume group over a GPT partition of one disk and the whole NVMe disk, with an XFS logical volume spanning both and an ext4 one | Pass: the XFS data disk and the spanning logical volume rebuilt with 4 KiB sectors (across two new volumes, same LVM and filesystem UUIDs), every file intact |
+| Root volume group extended onto a second disk, data disk grown before the migration | Replication through a 3-level snapshot chain, then between cycles: a middle snapshot deleted, a revert to a snapshot, the data disk grown, the system disk grown, a disk hot-added | Pass: the second disk carried inside the root disk; the revert copied the allocated areas again (the reverted file is absent, the later ones present); the data volume resized; the receiver reset with a bigger root disk; a volume added for the new disk |
+
+A Windows Server 2022 VM with a spanned dynamic volume over two disks lost
+that volume on Exoscale, as expected (see [Limitations](limitations.md)); its
+basic C: and D: volumes migrated fine. exo-v2v now reports dynamic disks
+before the cutover.
+
 ## Expected to work
 
 These are supported by virt-v2v and use the same mechanisms as the tested
@@ -62,7 +78,8 @@ are out of their vendors' support; we do not recommend them.
 | Encrypted system disks (LUKS, BitLocker) | The conversion has to read and modify the guest's system disk |
 | Operating systems other than Linux and Windows (FreeBSD, Solaris, …) | virt-v2v does not convert them |
 | 32-bit guests | Not tested; Exoscale instances are 64-bit |
-| VMs with more than 6 disks, independent disks or raw device mappings | See [Limitations](limitations.md) |
+| VMs with more than 5 data disks (unless carried inside the root disk), independent disks or raw device mappings | See [Limitations](limitations.md) |
+| Windows dynamic disks and Storage Spaces as data disks | Their metadata counts 512-byte sectors; see [Limitations](limitations.md) |
 
 ## Windows licensing
 

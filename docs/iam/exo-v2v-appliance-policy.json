@@ -18,7 +18,7 @@
         },
         {
           "action": "allow",
-          "expression": "operation in ['start-instance', 'stop-instance', 'scale-instance', 'delete-instance'] && resources.instance.name.startsWith('v2v-')"
+          "expression": "operation in ['start-instance', 'stop-instance', 'scale-instance', 'reset-instance', 'delete-instance'] && resources.instance.name.startsWith('v2v-')"
         },
         {
           "action": "allow",
@@ -26,7 +26,7 @@
         },
         {
           "action": "allow",
-          "expression": "operation in ['detach-block-storage-volume', 'update-block-storage-volume', 'delete-block-storage-volume'] && resources.block_storage_volume.name.startsWith('v2v-')"
+          "expression": "operation in ['detach-block-storage-volume', 'update-block-storage-volume', 'resize-block-storage-volume', 'delete-block-storage-volume'] && resources.block_storage_volume.name.startsWith('v2v-')"
         },
         {
           "action": "allow",

@@ -9,8 +9,49 @@ STANDARD_TYPES = [("tiny", 1, 1), ("small", 1, 2), ("medium", 2, 4), ("large", 4
 # Conversion runs virt-v2v (nested KVM + libguestfs appliance) inside the RAM
 # root: needs >= 8 GiB RAM and nested virtualization (verified on standard.large).
 CONVERT_MIN = "standard.large"
-MAX_DISKS = 6            # 1 root disk + 5 Block Storage volumes
+MAX_VOLUMES = 5          # Block Storage volumes per instance (+ the root disk)
 MIN_DISK_GB = 10
+MiB = 1 << 20
+CTL_ORDER = ("scsi", "sata", "nvme", "ide")
+
+
+def disk_key(d):
+    """scsi0:1 -> (0, 0, 1): controller type, bus, unit."""
+    kind = d.rstrip("0123456789:")
+    bus, unit = (int(x) for x in d[len(kind):].split(":"))
+    return (CTL_ORDER.index(kind) if kind in CTL_ORDER else len(CTL_ORDER), bus, unit)
+
+
+def align(n, a=MiB):
+    return -(-n // a) * a
+
+
+def fold_set(sysd, mounts, explicit=()):
+    """Disks to carry inside the system disk: every disk that shares a guest
+    filesystem with it (transitively), e.g. a root volume group extended onto a
+    second VMDK, plus the explicit ones."""
+    fold = set(explicit) - {sysd}
+    changed = True
+    while changed:
+        changed = False
+        for m in mounts:
+            ds = set(m["disks"])
+            if len(ds) > 1 and ds & ({sysd} | fold) and not ds - {sysd} <= fold:
+                fold |= ds - {sysd}
+                changed = True
+    return fold
+
+
+def fold_layout(root_cap, folds):
+    """[(disk, offset)] after the system disk, 1 MiB aligned, and the root disk
+    size in GB (1 MiB left at the end for a backup GPT)."""
+    if not folds:
+        return [], max(MIN_DISK_GB, gib_ceil(root_cap))
+    pos, out = align(root_cap), []
+    for d, cap in folds:
+        out.append((d, pos))
+        pos = align(pos + cap)
+    return out, max(MIN_DISK_GB, gib_ceil(pos + MiB))
 
 
 def instance_type_for(vcpus, mem_mb):
@@ -35,22 +76,50 @@ def os_family(guest_id):
 
 
 def build(inv, zone, target_type=None, system_disk=None, security_groups=(), receiver_template=None,
-          receiver_template_visibility="public", receiver_template_boot_mode=None):
+          receiver_template_visibility="public", receiver_template_boot_mode=None, fold=(), auto_fold=True):
     errors, warnings, notes = [], [], []
-    disks = inv["disks"]
+    disks = sorted(inv["disks"], key=lambda d: disk_key(d["id"]))
     if not disks:
         errors.append("VM has no virtual disks")
-    if len(disks) > MAX_DISKS:
-        errors.append(f"{len(disks)} disks: Exoscale allows 1 root disk + 5 Block Storage volumes")
     for d in disks:
         if d["mode"].startswith("independent"):
             errors.append(f"{d['id']} is {d['mode']}: independent disks are excluded from snapshots, "
                           "so CBT cannot replicate them (switch to dependent/persistent)")
         if not d["file"] or not d["file"].endswith(".vmdk"):
             errors.append(f"{d['id']}: unsupported backing {d['file']!r} (RDM?)")
-    sysd = system_disk or (disks[0]["id"] if disks else None)
+    sysd = system_disk or inv.get("boot_disk") or (disks[0]["id"] if disks else None)
     if disks and sysd not in [d["id"] for d in disks]:
         errors.append(f"system disk {sysd} not on the VM")
+    elif not system_disk and len(disks) > 1:
+        how = inv.get("boot_disk_source") or "first disk"
+        if how in ("controller order", "first disk"):
+            warnings.append(f"system disk {sysd} is a guess ({how}: no boot order and no VMware Tools "
+                            "disk mapping): check it, or pass --system-disk")
+        else:
+            notes.append(f"system disk {sysd} (from the {how})")
+    mounts = inv.get("guest_mounts") or []
+    fam = os_family(inv["guest_id"])
+    if fam == "windows":
+        for m in mounts:
+            if len(m["disks"]) > 1 or not m["disks"]:
+                where = f"spans {', '.join(m['disks'])}" if m["disks"] else "is not on a basic disk VMware Tools can map"
+                warnings.append(f"{m['path']} {where}: a Windows dynamic volume (spanned, striped or mirrored) or "
+                                "a Storage Spaces volume? Such disks cannot move to 4Kn Block Storage volumes and "
+                                "will not be readable on Exoscale: convert to basic disks first")
+        auto_fold = False             # a dynamic disk must stay a whole disk
+    unknown = [f for f in fold if f not in [d["id"] for d in disks]]
+    if unknown:
+        errors.append(f"--fold {', '.join(unknown)}: not a disk of the VM")
+    folded = fold_set(sysd, mounts if auto_fold else [], [f for f in fold if f not in unknown])
+    for m in mounts:
+        if len(m["disks"]) > 1 and set(m["disks"]) & folded:
+            notes.append(f"{m['path']} spans {', '.join(m['disks'])}: "
+                         f"{', '.join(sorted(set(m['disks']) & folded))} carried inside the root disk "
+                         "(a 4Kn volume cannot hold part of a 512-sector volume group)")
+    nvol = len(disks) - 1 - len(folded)
+    if nvol > MAX_VOLUMES:
+        errors.append(f"{nvol} data disks: Exoscale attaches at most {MAX_VOLUMES} Block Storage volumes "
+                      "(--fold DISK carries a disk inside the root disk instead)")
     if inv["firmware"] not in ("bios", "efi"):
         errors.append(f"unknown firmware {inv['firmware']}")
     secure_boot = bool(inv.get("secure_boot")) and inv["firmware"] == "efi"
@@ -68,7 +137,6 @@ def build(inv, zone, target_type=None, system_disk=None, security_groups=(), rec
     if len(inv["nics"]) > 1:
         warnings.append(f"{len(inv['nics'])} NICs: the instance gets one public interface; "
                         "additional networks must be attached as Exoscale Private Networks afterwards")
-    fam = os_family(inv["guest_id"])
     if fam == "windows":
         notes.append("Windows: `create` stages virtio-win + rhsrvany on the receiver (needs internet egress from the receiver)")
     if fam == "unknown":
@@ -93,19 +161,26 @@ def build(inv, zone, target_type=None, system_disk=None, security_groups=(), rec
         template = UEFI_TEMPLATE if inv["firmware"] == "efi" else BIOS_TEMPLATE
         receiver_user = "ubuntu" if inv["firmware"] == "efi" else "debian"
 
-    ordered = [d for d in disks if d["id"] == sysd] + [d for d in disks if d["id"] != sysd]
+    root = [d for d in disks if d["id"] == sysd]
+    vols = [d for d in disks if d["id"] != sysd and d["id"] not in folded]
+    folds = [d for d in disks if d["id"] in folded]
+    fold_at, root_gb = fold_layout(root[0]["capacity"] if root else 0, [(d["id"], d["capacity"]) for d in folds])
+    fold_at = dict(fold_at)
     mapping, volumes = [], []
-    for i, d in enumerate(ordered):
-        # volumes get >= 1 MiB slack: a GPT rescaled to 4096-byte sectors needs
-        # 20 KiB at the end for its backup (16.5 KiB at 512), and a last partition
-        # that reaches the last 512-byte usable LBA would otherwise overlap it
-        slack = (1 << 20) if i else 0
-        gb = max(MIN_DISK_GB, gib_ceil(d["capacity"] + slack))
+    for i, d in enumerate(root + vols + folds):
         export = "sd" + chr(ord("a") + i)
-        mapping.append({"disk": d["id"], "export": export, "capacity": d["capacity"], "size_gb": gb,
-                        "role": "root" if i == 0 else "volume", "label": d["label"]})
-        if i:
-            volumes.append(gb)
+        e = {"disk": d["id"], "export": export, "capacity": d["capacity"], "label": d["label"]}
+        if i == 0:
+            e.update(role="root", size_gb=root_gb)
+        elif d["id"] in folded:
+            e.update(role="fold", offset=fold_at[d["id"]], size_gb=0)
+        else:
+            # volumes get >= 1 MiB slack: a GPT rescaled to 4096-byte sectors needs
+            # 20 KiB at the end for its backup (16.5 KiB at 512), and a last partition
+            # that reaches the last 512-byte usable LBA would otherwise overlap it
+            e.update(role="volume", size_gb=max(MIN_DISK_GB, gib_ceil(d["capacity"] + MiB)))
+            volumes.append(e["size_gb"])
+        mapping.append(e)
     return {
         "vm": inv["name"], "zone": zone, "os_family": fam, "guest_id": inv["guest_id"],
         "firmware": inv["firmware"], "secure_boot": secure_boot, "tpm": bool(inv.get("vtpm")),
@@ -113,6 +188,8 @@ def build(inv, zone, target_type=None, system_disk=None, security_groups=(), rec
         "receiver_user": receiver_user,
         "target_type": target, "convert_type": convert_type,
         "root_gb": mapping[0]["size_gb"] if mapping else 0, "volumes_gb": volumes,
+        "folds": [{"export": e["export"], "disk": e["disk"], "offset": e["offset"], "size": e["capacity"]}
+                  for e in mapping if e["role"] == "fold"],
         "disks": mapping, "security_groups": list(security_groups),
         "errors": errors, "warnings": warnings, "notes": notes,
     }
