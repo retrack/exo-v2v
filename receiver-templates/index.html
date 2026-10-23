@@ -1,0 +1,1008 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/receiver-templates/">
+      
+      
+        <link rel="prev" href="../concepts/">
+      
+      
+        <link rel="next" href="../prerequisites/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Receiver templates - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#receiver-templates" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Receiver templates
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#availability" class="md-nav__link">
+    <span class="md-ellipsis">
+      Availability
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      Variants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use" class="md-nav__link">
+    <span class="md-ellipsis">
+      Use
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-register" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build and register
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      How it works
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#availability" class="md-nav__link">
+    <span class="md-ellipsis">
+      Availability
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      Variants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use" class="md-nav__link">
+    <span class="md-ellipsis">
+      Use
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-register" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build and register
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      How it works
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="receiver-templates">Receiver templates<a class="headerlink" href="#receiver-templates" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<p>A receiver template is an Exoscale template that boots straight into the
+exo-v2v receiver: a Linux system that runs entirely from RAM, so the
+migration can overwrite the instance's own disk. With a receiver template,
+<code>exo-v2v create</code> takes about one minute instead of 5 to 15, and the target
+instance needs no access to package mirrors.</p>
+<p>Without one, <code>create</code> starts the target instance from a stock Linux template,
+installs the conversion tools on it and switches it into RAM (<code>kexec</code>). Both
+ways produce the same receiver; the rest of the migration is identical.</p>
+<p><img alt="Creating the receiver from a template: exo-v2v creates the instance, it boots the template into RAM and installs the SSH key from user-data, then exo-v2v attaches the volumes and starts the agent" src="../diagrams/create-template.svg" /></p>
+<h2 id="availability">Availability<a class="headerlink" href="#availability" title="Permanent link">&para;</a></h2>
+<p>Exoscale does not publish receiver templates yet: build and register your own
+(below). Exoscale-published Windows variants would carry the Windows licence,
+so a migrated Windows guest would run on a Windows-licensed instance. Until
+then, contact Exoscale about licensing before migrating Windows guests.</p>
+<p>Templates built before exo-v2v 0.2.0 lack <code>dmsetup</code>, which 0.2.0 uses to
+rebuild LVM logical volumes. Such a receiver installs it when it needs it, which
+requires access to a package mirror: rebuild your templates to avoid that.</p>
+<h2 id="variants">Variants<a class="headerlink" href="#variants" title="Permanent link">&para;</a></h2>
+<p>The template's boot mode must match the VM's firmware. One image boots in both
+modes, with or without Secure Boot (Canonical-signed shim, GRUB and kernel), so
+Secure Boot is chosen per instance, not per template.</p>
+<table>
+<thead>
+<tr>
+<th>Template</th>
+<th>Boot mode</th>
+<th>For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exo-v2v-linux-uefi</code></td>
+<td>UEFI</td>
+<td>Linux VMs with UEFI firmware</td>
+</tr>
+<tr>
+<td><code>exo-v2v-linux-legacy</code></td>
+<td>legacy</td>
+<td>Linux VMs with BIOS firmware</td>
+</tr>
+<tr>
+<td><code>exo-v2v-windows-uefi</code></td>
+<td>UEFI</td>
+<td>Windows VMs with UEFI firmware</td>
+</tr>
+<tr>
+<td><code>exo-v2v-windows-legacy</code></td>
+<td>legacy</td>
+<td>Windows VMs with BIOS firmware</td>
+</tr>
+</tbody>
+</table>
+<p>The Windows variants also carry the virtio-win drivers and rhsrvany that
+virt-v2v needs to convert Windows guests. A Windows VM with BIOS firmware keeps
+BIOS on Exoscale: no conversion to UEFI is needed.</p>
+<h2 id="use">Use<a class="headerlink" href="#use" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>plan<span class="w"> </span>web01<span class="w"> </span>--vm<span class="w"> </span>web01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--receiver-template<span class="w"> </span>exo-v2v-linux-uefi<span class="w"> </span><span class="o">[</span>--receiver-template-visibility<span class="w"> </span>private<span class="o">]</span>
+exo-v2v<span class="w"> </span>create<span class="w"> </span>web01
+</code></pre></div>
+<p><code>plan</code> refuses a template whose boot mode does not match the VM. The receiver
+logs in as <code>v2v</code>; exo-v2v handles that.</p>
+<h2 id="build-and-register">Build and register<a class="headerlink" href="#build-and-register" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/retrack/exo-v2v/blob/main/template/receiver.pkr.hcl"><code>template/receiver.pkr.hcl</code></a>
+builds the image and registers both boot-mode variants with Exoscale's
+<a href="https://github.com/exoscale/packer-plugin-exoscale">Packer plugin</a>. Run it on
+Ubuntu 24.04, as a user with passwordless <code>sudo</code>, with an Exoscale API key that
+can register templates and write to an existing Object Storage bucket:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>mmdebstrap<span class="w"> </span>qemu-utils<span class="w"> </span>gdisk<span class="w"> </span>dosfstools<span class="w"> </span>grub-pc-bin<span class="w"> </span>grub-efi-amd64-signed<span class="w"> </span>shim-signed
+<span class="nb">export</span><span class="w"> </span><span class="nv">EXOSCALE_API_KEY</span><span class="o">=</span>EXO…<span class="w"> </span><span class="nv">EXOSCALE_API_SECRET</span><span class="o">=</span>…
+packer<span class="w"> </span>init<span class="w"> </span>template/
+packer<span class="w"> </span>build<span class="w"> </span>-var<span class="w"> </span><span class="nv">flavour</span><span class="o">=</span>linux<span class="w">   </span>-var<span class="w"> </span><span class="nv">image_bucket</span><span class="o">=</span>BUCKET<span class="w"> </span>template/<span class="w">   </span><span class="c1"># exo-v2v-linux-uefi, -legacy</span>
+packer<span class="w"> </span>build<span class="w"> </span>-var<span class="w"> </span><span class="nv">flavour</span><span class="o">=</span>windows<span class="w"> </span>-var<span class="w"> </span><span class="nv">image_bucket</span><span class="o">=</span>BUCKET<span class="w"> </span>template/<span class="w">   </span><span class="c1"># exo-v2v-windows-uefi, -legacy</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flavour</code></td>
+<td><code>linux</code></td>
+<td><code>linux</code>, or <code>windows</code> (adds virtio-win and rhsrvany)</td>
+</tr>
+<tr>
+<td><code>image_bucket</code></td>
+<td></td>
+<td>Existing bucket in the first zone; the image is removed after import</td>
+</tr>
+<tr>
+<td><code>zones</code></td>
+<td><code>["ch-gva-2"]</code></td>
+<td>Zones to register the templates in (templates are per zone)</td>
+</tr>
+<tr>
+<td><code>template_prefix</code></td>
+<td><code>exo-v2v</code></td>
+<td>Template names: <code>&lt;prefix&gt;-&lt;flavour&gt;-uefi</code> and <code>-legacy</code></td>
+</tr>
+</tbody>
+</table>
+<p>The recipe runs <code>template/build-image.sh</code>, which you can also run by hand and
+register yourself:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>template/build-image.sh<span class="w"> </span>linux<span class="w"> </span>exo-v2v-linux.qcow2<span class="w">       </span><span class="c1"># ~230 MB; windows: ~600 MB</span>
+exo<span class="w"> </span>storage<span class="w"> </span>upload<span class="w"> </span>exo-v2v-linux.qcow2<span class="w"> </span>sos://BUCKET/
+<span class="nv">URL</span><span class="o">=</span><span class="k">$(</span>exo<span class="w"> </span>storage<span class="w"> </span>presign<span class="w"> </span>sos://BUCKET/exo-v2v-linux.qcow2<span class="w"> </span>-e<span class="w"> </span>1h<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>m<span class="w"> </span><span class="k">in</span><span class="w"> </span>uefi<span class="w"> </span>legacy<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>exo<span class="w"> </span>compute<span class="w"> </span>instance-template<span class="w"> </span>register<span class="w"> </span>exo-v2v-linux-<span class="nv">$m</span><span class="w"> </span><span class="s2">"</span><span class="nv">$URL</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>md5sum<span class="w"> </span>&lt;<span class="w"> </span>exo-v2v-linux.qcow2<span class="w"> </span><span class="p">|</span><span class="w"> </span>cut<span class="w"> </span>-d<span class="s1">' '</span><span class="w"> </span>-f1<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--zone<span class="w"> </span>ch-gva-2<span class="w"> </span>--boot-mode<span class="w"> </span><span class="nv">$m</span><span class="w"> </span>--username<span class="w"> </span>v2v<span class="w"> </span>--disable-password
+<span class="k">done</span>
+</code></pre></div>
+<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The image is a 10 GB disk with a BIOS boot partition and an EFI system
+  partition. GRUB loads the kernel and a ~220 MB initramfs that holds the whole
+  receiver system (virt-v2v, libguestfs, QEMU, filesystem tools). The disk is
+  never mounted.</li>
+<li>At boot the receiver reads the migration's SSH key from the instance
+  user-data, generates its own SSH host keys and starts SSH. The Windows variant
+  first copies virtio-win from the EFI partition into RAM.</li>
+<li><code>create</code> waits for SSH before attaching the Block Storage volumes, then streams
+  the exo-v2v agent over SSH and starts it.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

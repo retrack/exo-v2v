@@ -1,0 +1,58 @@
+{
+  "default-service-strategy": "deny",
+  "services": {
+    "compute": {
+      "type": "rules",
+      "rules": [
+        {
+          "action": "allow",
+          "expression": "operation.startsWith('get-') || operation.startsWith('list-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['create-instance', 'create-block-storage-volume', 'register-ssh-key', 'create-private-network', 'create-anti-affinity-group'] && parameters.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'delete-ssh-key' && resources.ssh_key.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['start-instance', 'stop-instance', 'scale-instance', 'reset-instance', 'delete-instance', 'update-instance'] && resources.instance.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'attach-block-storage-volume-to-instance' && resources.instance.name.startsWith('v2v-') && resources.block_storage_volume.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['detach-block-storage-volume', 'update-block-storage-volume', 'resize-block-storage-volume', 'delete-block-storage-volume'] && resources.block_storage_volume.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'attach-instance-to-private-network' && resources.private_network.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'delete-private-network' && resources.private_network.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'delete-anti-affinity-group' && resources.anti_affinity_group.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'create-security-group' && (parameters.name.startsWith('exo-v2v-') || parameters.name.startsWith('v2v-'))"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['add-rule-to-security-group', 'delete-security-group', 'detach-instance-from-security-group'] && (resources.security_group.name.startsWith('exo-v2v-') || resources.security_group.name.startsWith('v2v-'))"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'attach-instance-to-security-group'"
+        }
+      ]
+    }
+  }
+}

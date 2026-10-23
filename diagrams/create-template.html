@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creating the receiver from a template</title>
+  <!-- diagram-design skill, Exoscale skin, font source: system (no network requests) -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · exo-v2v</p>
+    <h1>Creating the receiver from a template</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 64 960 504" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="create-template-title create-template-desc">
+        <title id="create-template-title">Creating the receiver from a template</title>
+        <desc id="create-template-desc">With a receiver template, the target instance boots straight into the RAM-root receiver, installs the migration's SSH key from its user-data, then exo-v2v attaches the Block Storage volumes and starts the agent.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="64" width="960" height="504" fill="#fafafa"/>
+<line x1="160" y1="144" x2="160" y2="488" stroke="rgba(33,33,33,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="480" y1="144" x2="480" y2="488" stroke="rgba(33,33,33,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="800" y1="144" x2="800" y2="488" stroke="rgba(33,33,33,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="520" y="284" width="360" height="48" rx="4" fill="rgba(33,33,33,0.02)" stroke="rgba(33,33,33,0.22)" stroke-width="1"/>
+<rect x="520" y="284" width="40" height="16" rx="2" fill="#fafafa" stroke="rgba(33,33,33,0.22)" stroke-width="1"/>
+<text x="540" y="296" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.12em">OPT</text>
+<text x="568" y="296" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.04em">[Windows template]</text>
+<path d="M 164,176 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#arrow-link)"/><rect x="300.0" y="156" width="40" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="165" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CREATE</text>
+<path d="M 484,208 H 796" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#arrow-link)"/><rect x="602.0" y="188" width="76" height="12" rx="2" fill="#fafafa"/><text x="640.0" y="197" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">BOOT TEMPLATE</text>
+<path d="M 804,228 H 828 Q 836,228 836,236 Q 836,244 828,244 H 806" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/><rect x="844" y="230" width="48" height="12" rx="2" fill="#fafafa"/><text x="868.0" y="239" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">RAM ROOT</text>
+<path d="M 804,256 H 828 Q 836,256 836,264 Q 836,272 828,272 H 806" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/><rect x="844" y="258" width="68" height="12" rx="2" fill="#fafafa"/><text x="878.0" y="267" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">USERDATA KEY</text>
+<path d="M 804,304 H 828 Q 836,304 836,312 Q 836,320 828,320 H 806" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/><rect x="844" y="306" width="60" height="12" rx="2" fill="#fafafa"/><text x="874.0" y="315" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">VIRTIO-WIN</text>
+<path d="M 796,368 H 164" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/><rect x="300.0" y="348" width="40" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="357" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SSH UP</text>
+<path d="M 164,400 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#arrow-link)"/><rect x="280.0" y="380" width="80" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="389" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ATTACH VOLUMES</text>
+<path d="M 164,432 H 796" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/><rect x="290.0" y="412" width="60" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="421" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">PUSH AGENT</text>
+<path d="M 796,464 H 164" fill="none" stroke="#da291c" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#arrow-accent)"/><rect x="288.0" y="444" width="64" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="453" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">AGENT READY</text>
+<rect x="72.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="72.0" y="88" width="176" height="56" rx="6" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<rect x="80.0" y="94" width="28" height="12" rx="2" fill="none" stroke="rgba(218,41,28,0.50)" stroke-width="0.8"/>
+<text x="94.0" y="103" fill="#da291c" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="160.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Replication appliance</text>
+<text x="160.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">exo-v2v create</text>
+<rect x="392.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="392.0" y="88" width="176" height="56" rx="6" fill="rgba(33,33,33,0.03)" stroke="rgba(33,33,33,0.30)" stroke-width="1"/>
+<rect x="400.0" y="94" width="28" height="12" rx="2" fill="none" stroke="rgba(33,33,33,0.22)" stroke-width="0.8"/>
+<text x="414.0" y="103" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+<text x="480.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Exoscale API</text>
+<text x="480.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">compute</text>
+<rect x="712.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="712.0" y="88" width="176" height="56" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="720.0" y="94" width="28" height="12" rx="2" fill="none" stroke="rgba(33,33,33,0.40)" stroke-width="0.8"/>
+<text x="734.0" y="103" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VM</text>
+<text x="800.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Target instance</text>
+<text x="800.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">receiver template</text>
+<line x1="40" y1="512" x2="920" y2="512" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/>
+<text x="40" y="528" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<path d="M 40,545 H 68" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="76" y="548" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">API call</text>
+<path d="M 144.8,545 H 172.8" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="180.8" y="548" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">SSH</text>
+<path d="M 224.10000000000002,545 H 252.10000000000002" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="260.1" y="548" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Return</text>
+<path d="M 318.70000000000005,545 H 346.70000000000005" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<text x="354.70000000000005" y="548" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Ready to sync</text>
+      </svg>
+    </div>
+    <p class="caption">About one minute from create to ready, against 5 to 15 with a stock template, which installs the tools first. The disk is never mounted, so the first sync can overwrite it.</p>
+  </div>
+</body>
+</html>

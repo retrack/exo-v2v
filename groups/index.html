@@ -1,0 +1,1208 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/groups/">
+      
+      
+        <link rel="prev" href="../OPERATIONS/">
+      
+      
+        <link rel="next" href="../web/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Moving an application - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#moving-an-application-groups" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Moving an application
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-group-adds" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a group adds
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Commands
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      The manifest
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Networks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-cutover" class="md-nav__link">
+    <span class="md-ellipsis">
+      The cutover
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rollback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clean-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Clean-up
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limits
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-group-adds" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a group adds
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Commands
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      The manifest
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Networks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-cutover" class="md-nav__link">
+    <span class="md-ellipsis">
+      The cutover
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rollback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clean-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Clean-up
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limits
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="moving-an-application-groups">Moving an application (groups)<a class="headerlink" href="#moving-an-application-groups" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<p>A group moves several VMs that work together, for example a load balancer, a
+few application servers and a database, as one unit. Every VM is replicated
+while it runs, like a single migration. The cutover is coordinated: one
+maintenance window, the VMs stopped and started in a set order, health checks
+between the steps, and one command to bring the whole application back on
+VMware if something fails.</p>
+<p><img alt="Group cutover: the tiers stop front to back, every member converts in parallel, then the tiers start back to front with a health check after each" src="../diagrams/group-cutover.svg" /></p>
+<h2 id="what-a-group-adds">What a group adds<a class="headerlink" href="#what-a-group-adds" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Order</td>
+<td>Tiers: tier 1 is the back end (databases), higher tiers are closer to the users. The cutover stops the highest tier first and starts tier 1 first</td>
+</tr>
+<tr>
+<td>Downtime</td>
+<td>Each VM's final copy and conversion start as soon as that VM is off, and the conversions run in parallel: the window is close to the slowest member's downtime, not the sum</td>
+</tr>
+<tr>
+<td>Private addresses</td>
+<td>A vSphere port group maps to an Exoscale managed private network. Each VM keeps its address there (a static lease), so configurations that name other servers by IP keep working</td>
+</tr>
+<tr>
+<td>Health checks</td>
+<td>TCP, HTTP or a command, run from the appliance after each tier starts. The next tier starts only when the checks pass</td>
+</tr>
+<tr>
+<td>Hooks</td>
+<td>Commands run on the appliance before the first VM stops and after the last tier is healthy (maintenance page, DNS switch)</td>
+</tr>
+<tr>
+<td>Placement</td>
+<td>Anti-affinity groups keep VMs such as the two application servers on different hypervisors</td>
+</tr>
+<tr>
+<td>Rollback</td>
+<td><code>group rollback</code> stops the Exoscale instances and powers the sources on, back end first</td>
+</tr>
+<tr>
+<td>Resume</td>
+<td>The cutover records every step. If the appliance or the command stops, <code>group cutover</code> again continues where it stopped</td>
+</tr>
+</tbody>
+</table>
+<p>Members are ordinary migrations named <code>GROUP-VM</code> (<code>shop-db01</code>): <code>exo-v2v status</code>
+and the <a href="../web/">web status page</a> show them, and their logs are in
+<code>~/.exo-v2v/groups/GROUP/logs/</code>.</p>
+<h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>group<span class="w"> </span>discover<span class="w"> </span>shop<span class="w"> </span>--vm<span class="w"> </span>lb01<span class="w"> </span>--vm<span class="w"> </span>app01<span class="w"> </span>--vm<span class="w"> </span>app02<span class="w"> </span>--vm<span class="w"> </span>db01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2<span class="w">   </span><span class="c1"># draft shop.yaml</span>
+vi<span class="w"> </span>shop.yaml<span class="w">                                     </span><span class="c1"># tiers, security groups, health checks, hooks</span>
+exo-v2v<span class="w"> </span>group<span class="w"> </span>plan<span class="w">     </span>shop<span class="w"> </span>-f<span class="w"> </span>shop.yaml<span class="w">         </span><span class="c1"># every member's plan + the cutover runbook</span>
+exo-v2v<span class="w"> </span>group<span class="w"> </span>create<span class="w">   </span>shop<span class="w">                      </span><span class="c1"># private networks, anti-affinity groups, receivers</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>sync<span class="w"> </span>shop<span class="w">                  </span><span class="c1"># a cycle on every member, in parallel</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>sync<span class="w"> </span>shop<span class="w"> </span>--every<span class="w"> </span><span class="m">900</span><span class="w">      </span><span class="c1"># keep them fresh until the window</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>cutover<span class="w"> </span>shop<span class="w">               </span><span class="c1"># the window</span>
+exo-v2v<span class="w"> </span>group<span class="w"> </span>status<span class="w">   </span>shop
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>rollback<span class="w"> </span>shop<span class="w">              </span><span class="c1"># if needed: back on VMware</span>
+exo-v2v<span class="w"> </span>group<span class="w"> </span>cleanup<span class="w">  </span>shop<span class="w">                      </span><span class="c1"># after validation</span>
+</code></pre></div>
+<p><code>group plan</code> checks every VM as <code>plan</code> does, plus the group: every port group
+mapped, no address used twice, security groups present, instance and private
+network quotas. Nothing is created before <code>group create</code>.</p>
+<h2 id="the-manifest">The manifest<a class="headerlink" href="#the-manifest" title="Permanent link">&para;</a></h2>
+<p><code>group discover</code> writes a draft from vSphere: one network per port group, with
+the addresses VMware Tools reports. A port group that carries the default route
+of a VM with several NICs is taken for the front end (the public interface).
+Check every line.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shop</span>
+<span class="nt">zone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ch-gva-2</span>
+
+<span class="nt">defaults</span><span class="p">:</span><span class="w">                               </span><span class="c1"># any per-VM key, for every VM</span>
+<span class="w">  </span><span class="nt">receiver_template</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">exo-v2v-linux-legacy</span>
+<span class="w">  </span><span class="nt">receiver_template_visibility</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">private</span>
+
+<span class="nt">networks</span><span class="p">:</span><span class="w">                               </span><span class="c1"># vSphere port group -&gt; Exoscale</span>
+<span class="w">  </span><span class="nt">front</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pg-front</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public</span><span class="w">                        </span><span class="c1"># the instance's public interface (DHCP)</span>
+<span class="w">  </span><span class="nt">app</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pg-app</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">private</span><span class="w">                       </span><span class="c1"># a managed private network, v2v-shop-app</span>
+<span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.20.0.0/24</span>
+<span class="w">    </span><span class="nt">keep_addresses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                </span><span class="c1"># static leases = the VMs' current addresses</span>
+
+<span class="nt">security_groups</span><span class="p">:</span><span class="w">                        </span><span class="c1"># created by `group create` when missing</span>
+<span class="w">  </span><span class="nt">v2v-shop-web</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">tcp/80 0.0.0.0/0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tcp/443 0.0.0.0/0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">v2v-shop-closed</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                   </span><span class="c1"># no ingress at all</span>
+
+<span class="nt">anti_affinity</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">app01</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">app02</span><span class="p p-Indicator">]</span><span class="w">                   </span><span class="c1"># different hypervisors (set at creation)</span>
+
+<span class="nt">vms</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">db01</span>
+<span class="w">    </span><span class="nt">tier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span><span class="w">                             </span><span class="c1"># started first, stopped last</span>
+<span class="w">    </span><span class="nt">security_groups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">v2v-shop-closed</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">health</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">tcp</span><span class="p">:</span><span class="w"> </span><span class="nv">5432</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app01</span>
+<span class="w">    </span><span class="nt">tier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">    </span><span class="nt">security_groups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">v2v-shop-closed</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">health</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">http</span><span class="p">:</span><span class="w"> </span><span class="s">"http://{public_ip}:8080/health"</span><span class="p p-Indicator">,</span><span class="nt"> expect</span><span class="p">:</span><span class="w"> </span><span class="nv">ok</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app02</span>
+<span class="w">    </span><span class="nt">tier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">    </span><span class="nt">security_groups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">v2v-shop-closed</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">health</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">http</span><span class="p">:</span><span class="w"> </span><span class="s">"http://{public_ip}:8080/health"</span><span class="p p-Indicator">,</span><span class="nt"> expect</span><span class="p">:</span><span class="w"> </span><span class="nv">ok</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lb01</span>
+<span class="w">    </span><span class="nt">tier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span><span class="w">                             </span><span class="c1"># stopped first, started last</span>
+<span class="w">    </span><span class="nt">security_groups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">v2v-shop-web</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">health</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">http</span><span class="p">:</span><span class="w"> </span><span class="s">"http://{public_ip}/"</span><span class="p p-Indicator">,</span><span class="nt"> expect</span><span class="p">:</span><span class="w"> </span><span class="s">"beats"</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lb01</span><span class="w">                          </span><span class="c1"># renamed at cleanup (default: v2v-shop-lb01)</span>
+
+<span class="nt">hooks</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">pre_cutover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./maintenance-page.sh on</span>
+<span class="w">  </span><span class="nt">post_cutover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./switch-dns.sh {lb01.public_ip}</span>
+
+<span class="nt">cutover</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">parallel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span><span class="w">                           </span><span class="c1"># member cutovers at a time</span>
+<span class="w">  </span><span class="nt">max_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30m</span><span class="w">                       </span><span class="c1"># stop when exceeded</span>
+<span class="w">  </span><span class="nt">rollback_on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">            </span><span class="c1"># true: roll back on any failure</span>
+<span class="w">  </span><span class="nt">health_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10m</span>
+<span class="w">  </span><span class="nt">max_sync_age</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span><span class="w">                      </span><span class="c1"># members must have synced this recently</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>networks.NAME.source</code></td>
+<td>A vSphere port group. Every NIC of every member must be on a mapped port group</td>
+</tr>
+<tr>
+<td><code>networks.NAME.type</code></td>
+<td><code>public</code>: the instance's public interface, DHCP. <code>private</code>: an Exoscale managed private network</td>
+</tr>
+<tr>
+<td><code>networks.NAME.cidr</code></td>
+<td>The subnet of a private network. The top host address (<code>.254</code> of a /24) belongs to Exoscale's DHCP server: a VM using it must be renumbered</td>
+</tr>
+<tr>
+<td><code>networks.NAME.exoscale_name</code></td>
+<td>An existing private network to use instead of creating <code>v2v-GROUP-NAME</code> (the appliance role only attaches <code>v2v-*</code> networks)</td>
+</tr>
+<tr>
+<td><code>vms[].tier</code></td>
+<td>1 = back end. Members of a tier stop and start together</td>
+</tr>
+<tr>
+<td><code>vms[].ip</code></td>
+<td><code>{NETWORK: ADDRESS}</code> when VMware Tools do not report the address</td>
+</tr>
+<tr>
+<td><code>vms[].security_groups</code></td>
+<td>Attached at cutover. Existing groups, or ones defined under <code>security_groups:</code></td>
+</tr>
+<tr>
+<td><code>vms[].health</code></td>
+<td><code>tcp: PORT</code>, <code>http: URL</code> (2xx/3xx, optional <code>expect: TEXT</code> in the body), <code>command: SHELL</code> (exit 0), <code>timeout</code></td>
+</tr>
+<tr>
+<td><code>vms[].name</code></td>
+<td>The instance's final name, applied by <code>group cleanup</code></td>
+</tr>
+<tr>
+<td><code>vms[]</code> other keys</td>
+<td>As the <code>plan</code> options: <code>instance_type</code>, <code>system_disk</code>, <code>receiver_template</code>, <code>receiver_template_visibility</code>, <code>fold</code>, <code>no_fold</code></td>
+</tr>
+</tbody>
+</table>
+<p>Placeholders in health checks and hooks: <code>{public_ip}</code>, <code>{private_ip}</code>,
+<code>{ip.NETWORK}</code> (the member's own), and <code>{VM.public_ip}</code>, <code>{VM.private_ip}</code>,
+<code>{VM.ip.NETWORK}</code> for any member. Hooks also get <code>V2V_GROUP</code>, <code>V2V_STEP</code> and
+<code>V2V_&lt;VM&gt;_PUBLIC_IP</code> / <code>V2V_&lt;VM&gt;_PRIVATE_IP</code> in their environment, and run in
+the manifest's directory.</p>
+<h2 id="networks">Networks<a class="headerlink" href="#networks" title="Permanent link">&para;</a></h2>
+<p>Each Exoscale instance gets its public interface first, then one NIC per
+private network, in the order of the source NICs. <code>group create</code> attaches the
+private networks to the receivers, each address as a static lease, so their
+MAC addresses are known before the cutover. The conversion then writes a map
+into the guest (<code>/etc/v2v-netfix.map</code>) that the first-boot network fix follows:</p>
+<table>
+<thead>
+<tr>
+<th>Source NIC</th>
+<th>On Exoscale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>On a public port group (DHCP)</td>
+<td>The public interface, DHCP</td>
+</tr>
+<tr>
+<td>Static address on a private port group</td>
+<td>The private network NIC with the same address. Its gateway is removed: there is no router on a private network, so the default route goes through the public interface</td>
+</tr>
+<tr>
+<td>Only private NICs (a typical database)</td>
+<td>The same, plus a DHCP configuration for the public interface</td>
+</tr>
+</tbody>
+</table>
+<p>The fix works on ifupdown, netplan, NetworkManager keyfiles and ifcfg files,
+whatever the interface names were on VMware (<code>ens192</code>, <code>eth0</code>...). Windows gets
+its addresses from a first-boot task that matches the new adapters by MAC.</p>
+<p>Every member keeps a public IP. Its security groups decide what reaches it:
+with <code>v2v-shop-closed</code> above, nothing does except the appliance, which the
+migration's own <code>exo-v2v-&lt;member&gt;</code> group lets in (SSH and the health check
+ports) until <code>cleanup</code>. Traffic between members on a private network is not
+filtered by security groups.</p>
+<p>The load balancer's public IP is its receiver's IP, known from <code>group create</code>
+on, so DNS can be prepared before the window. Elastic IPs are not handled
+(they need configuration in the guest).</p>
+<p>Static DNS servers in the guests' configurations are kept. If they are on
+premises, change them before the cutover or in the <code>post_cutover</code> hook.</p>
+<h2 id="the-cutover">The cutover<a class="headerlink" href="#the-cutover" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Preflight</strong>: every member synced within <code>max_sync_age</code>, its receiver running
+   and attached to its private networks, no blocking problem in the preflight
+   reports, no other command running on it.</li>
+<li><strong>Last warm cycle</strong> on every member in parallel, to make the final copies small.</li>
+<li><strong><code>pre_cutover</code> hook.</strong> Nothing is stopped before this point: a failure here
+   leaves the application running on VMware.</li>
+<li><strong>Stop, front to back.</strong> The members of the highest tier shut down; each
+   member's final copy and conversion start as soon as it is off. When the whole
+   tier is off, the next one shuts down.</li>
+<li><strong>Conversions</strong> run in parallel, each on its own instance, with the volume
+   rebuilds that some filesystems need.</li>
+<li><strong>Instances stopped and resized</strong> to their final types.</li>
+<li><strong>Start, back to front.</strong> Tier 1 starts and its health checks must pass, then
+   tier 2, and so on.</li>
+<li><strong><code>post_cutover</code> hook</strong>, then the report: the window and each member's downtime.</li>
+</ol>
+<p>If a step fails, the cutover stops there and prints the state. The members that
+were converting finish first, so each one stops in a consistent state. Then
+either fix the problem and run <code>group cutover</code> again, which resumes, or run
+<code>group rollback</code>. With <code>rollback_on_failure: true</code>, or when <code>max_window</code> is
+exceeded with it, the rollback starts by itself.</p>
+<p>The VMs are shut down cleanly in order, so the database stops after the
+applications that write to it and each disk is consistent: no snapshot across
+VMs is needed.</p>
+<h2 id="rollback">Rollback<a class="headerlink" href="#rollback" title="Permanent link">&para;</a></h2>
+<p><code>group rollback</code> stops the Exoscale instances, front first, then powers the
+sources on, back end first, waiting for VMware Tools in each tier before the
+next one. Members whose conversion had not started keep their receivers:
+<code>group sync</code> continues from their last cycle. Converted members must be created
+again for another attempt: <code>group cleanup shop --delete-instances</code>, then
+<code>group plan</code>, <code>create</code> and <code>sync</code>.</p>
+<p>Data written on Exoscale after the cutover is not copied back.</p>
+<h2 id="clean-up">Clean-up<a class="headerlink" href="#clean-up" title="Permanent link">&para;</a></h2>
+<p>After you validated the application, <code>group cleanup</code> removes each member's
+<code>exo-v2v-&lt;member&gt;</code> security group and rollback volumes, and renames the
+instances to their <code>name</code>. The private networks, anti-affinity groups and
+security groups stay: the migrated instances use them.</p>
+<p><code>group cleanup --delete-instances</code> abandons the move: it deletes the instances
+and volumes (<code>--force</code> for members already cut over), then the networks, groups
+and security groups <code>group create</code> made.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
+<ul>
+<li>One appliance replicates every member: it must see all their datastores.</li>
+<li>Members are listed by name (<code>--vm</code>); selecting by vCenter folder or tag comes later.</li>
+<li>One zone per group.</li>
+<li>Managed private networks only (no VPC subnets yet); no Elastic IPs.</li>
+<li>No rehearsal (a test cutover on copies while the sources keep running) yet.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

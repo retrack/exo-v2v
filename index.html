@@ -1,0 +1,1026 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/">
+      
+      
+      
+        <link rel="next" href="concepts/">
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#exo-v2v" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Home
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      What it handles
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where to start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      Install
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migrate-a-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migrate a VM
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#move-an-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      Move an application
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      What it handles
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where to start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      Install
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migrate-a-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migrate a VM
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#move-an-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      Move an application
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="exo-v2v">exo-v2v<a class="headerlink" href="#exo-v2v" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<p>exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
+instance. The VM keeps running while its disks are copied; it is stopped only
+for the final cutover, which took 2 to 9 minutes in our tests, whatever the size
+of the disks.</p>
+<p><img alt="exo-v2v architecture: a replication appliance in vSphere reads frozen VM disks and writes them through an SSH tunnel to the target Exoscale instance" src="diagrams/architecture.svg" /></p>
+<ul>
+<li><strong>Replicate while the VM runs.</strong> The VM's disks are copied straight to the
+  disks of the target instance, then kept in sync with VMware Changed Block
+  Tracking: each cycle copies only what changed.</li>
+<li><strong>Cut over.</strong> The VM is shut down, the last changes are copied, the guest is
+  converted for KVM on the target instance itself, and the instance boots the
+  migrated system from its own disks.</li>
+</ul>
+<p>No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.</p>
+<h2 id="what-it-handles">What it handles<a class="headerlink" href="#what-it-handles" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Supported</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Guests</td>
+<td>Linux (Ubuntu, Debian, RHEL family) and Windows Server 2022/2025, BIOS or UEFI, Secure Boot, vTPM (<a href="supported-os/">details</a>)</td>
+</tr>
+<tr>
+<td>Disks</td>
+<td>Several VMDKs per VM on SCSI, SATA or NVMe controllers; the system disk is found from the boot order or VMware Tools; up to 5 data disks as Block Storage volumes</td>
+</tr>
+<tr>
+<td><strong>VMDK chains</strong></td>
+<td>VMs running on snapshot deltas, at any depth. Snapshots may be taken, deleted or reverted during replication: a revert makes the next cycle copy the allocated areas again</td>
+</tr>
+<tr>
+<td>Disks that change</td>
+<td>A disk grown during replication is followed (its volume is resized; a grown system disk resets the target instance); a disk added is replicated to a new volume</td>
+</tr>
+<tr>
+<td>LVM</td>
+<td>Volume groups spread over several disks. A disk that extends the system disk's volume group is carried inside the root disk; logical volumes on data disks are rebuilt for 4 KiB sectors when their filesystem needs it, with the same UUIDs</td>
+</tr>
+<tr>
+<td>Filesystems</td>
+<td>ext, XFS (including 512-byte-sector XFS, the RHEL default on VMware), NTFS, swap; partition tables GPT and MBR</td>
+</tr>
+<tr>
+<td>Replication</td>
+<td>Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance</td>
+</tr>
+<tr>
+<td><strong>Applications</strong></td>
+<td>A <a href="groups/">group</a> of VMs (load balancer, application servers, databases) replicated together and cut over in one window: stopped front to back, converted in parallel, started back to front with health checks, rolled back as a whole</td>
+</tr>
+<tr>
+<td>Networks</td>
+<td>Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs</td>
+</tr>
+<tr>
+<td>Status page</td>
+<td>A read-only <a href="web/">web page</a> on the appliance with every migration and group</td>
+</tr>
+<tr>
+<td>Not supported</td>
+<td>Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks (<a href="limitations/">limitations</a>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="where-to-start">Where to start<a class="headerlink" href="#where-to-start" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="concepts/">How it works</a></td>
+<td>The replication appliance, sync cycles, cutover, guest adaptation, security model</td>
+</tr>
+<tr>
+<td><a href="prerequisites/">Prerequisites</a></td>
+<td>vSphere privileges, the appliance, network flows, Exoscale account</td>
+</tr>
+<tr>
+<td><a href="iam/">IAM role</a></td>
+<td>A least-privilege Exoscale role for the appliance's API key</td>
+</tr>
+<tr>
+<td><a href="receiver-templates/">Receiver templates</a></td>
+<td>Templates that boot straight into the receiver, and the Packer recipe that builds them</td>
+</tr>
+<tr>
+<td><a href="groups/">Moving an application</a></td>
+<td>Groups: the manifest, private networks, the coordinated cutover, rollback</td>
+</tr>
+<tr>
+<td><a href="web/">Web status page</a></td>
+<td>The read-only status page and its API</td>
+</tr>
+<tr>
+<td><a href="OPERATIONS/">Operations runbook</a></td>
+<td>Step-by-step migration, rollback, troubleshooting</td>
+</tr>
+<tr>
+<td><a href="supported-os/">Supported operating systems</a></td>
+<td>Tested and expected-to-work guests, measured downtime</td>
+</tr>
+<tr>
+<td><a href="limitations/">Limitations</a></td>
+<td>Known limits and their workarounds</td>
+</tr>
+<tr>
+<td><a href="ARCHITECTURE/">Architecture</a></td>
+<td>Design details for contributors</td>
+</tr>
+</tbody>
+</table>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<p>On the replication appliance (a Linux VM in the same vSphere environment, with
+Python 3.10 or later and the <a href="https://github.com/exoscale/cli"><code>exo</code> CLI</a>):</p>
+<div class="highlight"><pre><span></span><code>pipx<span class="w"> </span>install<span class="w"> </span>https://github.com/retrack/exo-v2v/releases/download/v0.3.0/exo_v2v-0.3.0-py3-none-any.whl
+exo<span class="w"> </span>config<span class="w">                          </span><span class="c1"># Exoscale credentials for the exo CLI</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VSPHERE_HOST</span><span class="o">=</span>vcenter.example<span class="w"> </span><span class="nv">VSPHERE_USER</span><span class="o">=</span>migration@vsphere.local<span class="w"> </span><span class="nv">VSPHERE_PASSWORD</span><span class="o">=</span>…
+</code></pre></div>
+<h2 id="migrate-a-vm">Migrate a VM<a class="headerlink" href="#migrate-a-vm" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>plan<span class="w">    </span>web01<span class="w"> </span>--vm<span class="w"> </span>web01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2<span class="w"> </span>--security-group<span class="w"> </span>web
+exo-v2v<span class="w"> </span>create<span class="w">  </span>web01<span class="w">                   </span><span class="c1"># target instance and volumes</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>sync<span class="w"> </span>web01<span class="w">              </span><span class="c1"># first cycle: full copy, the VM keeps running</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>sync<span class="w"> </span>web01<span class="w"> </span>--every<span class="w"> </span><span class="m">900</span><span class="w">  </span><span class="c1"># keep it fresh until the maintenance window</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>cutover<span class="w"> </span>web01<span class="w">           </span><span class="c1"># downtime starts here</span>
+exo-v2v<span class="w"> </span>cleanup<span class="w"> </span>web01<span class="w">                   </span><span class="c1"># after you validated the workload</span>
+</code></pre></div>
+<p><code>plan</code> prints everything it will do and refuses unsupported VMs; nothing is
+created before <code>create</code>. Every step can be repeated or resumed, and
+<code>exo-v2v rollback</code> powers the source VM back on until <code>cleanup</code>.</p>
+<h2 id="move-an-application">Move an application<a class="headerlink" href="#move-an-application" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>group<span class="w"> </span>discover<span class="w"> </span>shop<span class="w"> </span>--vm<span class="w"> </span>lb01<span class="w"> </span>--vm<span class="w"> </span>app01<span class="w"> </span>--vm<span class="w"> </span>app02<span class="w"> </span>--vm<span class="w"> </span>db01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2
+exo-v2v<span class="w"> </span>group<span class="w"> </span>plan<span class="w">    </span>shop<span class="w"> </span>-f<span class="w"> </span>shop.yaml<span class="w">     </span><span class="c1"># after setting tiers, health checks, security groups</span>
+exo-v2v<span class="w"> </span>group<span class="w"> </span>create<span class="w">  </span>shop<span class="w">                  </span><span class="c1"># private networks, anti-affinity, receivers</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>sync<span class="w"> </span>shop<span class="w"> </span>--every<span class="w"> </span><span class="m">900</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>cutover<span class="w"> </span>shop<span class="w">          </span><span class="c1"># one window for the whole application</span>
+</code></pre></div>
+<p>See <a href="groups/">Moving an application</a>. <code>sudo -E exo-v2v web</code> shows every
+migration and group on a <a href="web/">read-only page</a>.</p>
+<p>exo-v2v is licensed under the Apache License 2.0. Source:
+<a href="https://github.com/retrack/exo-v2v">github.com/retrack/exo-v2v</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>
