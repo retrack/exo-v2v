@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["pyvmomi>=8.0"]
+dependencies = ["pyvmomi>=8.0", "pyyaml>=5.4"]
 
 [project.scripts]
 exo-v2v = "exo_v2v.cli:main"
@@ -22,4 +22,5 @@ version = {attr = "exo_v2v.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
+"exo_v2v" = ["web.html"]
 "exo_v2v.receiver" = ["*.py", "*.sh"]

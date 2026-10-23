@@ -63,4 +63,70 @@ echo "== none (no config)"; T=$W/none; mkdir -p $T/root/etc/network; nic $T ens3
 printf 'auto lo\niface lo inet loopback\n' > $T/root/etc/network/interfaces
 run $T; grep -q 'iface ens3 inet dhcp' $T/root/etc/network/interfaces.d/v2v-ens3 2>/dev/null && ok "fallback DHCP stanza" || bad "no fallback"
 
+# ---- plan-driven map (group members: public NIC + private network with the same address) ----
+A=06:a1:02:00:07:cd; B=0a:e2:d0:88:6e:d6
+nicm() { nic "$1" "$2"; echo "$3" > "$1/sys/class/net/$2/address"; }
+map() { mkdir -p "$1/root/etc"; printf '%s dhcp\n%s static %s nogw\n' "$A" "$B" "$2" > "$1/root/etc/v2v-netfix.map"; }
+
+echo "== map: rhel NM keyfile static (app/db server)"; T=$W/mrh; K=$T/root/etc/NetworkManager/system-connections
+mkdir -p $K; nicm $T eth0 $A; nicm $T eth1 $B; map $T 10.20.0.31/24
+printf '[connection]\nid=ens192\ntype=ethernet\ninterface-name=ens192\n[ethernet]\nmac-address=00:50:56:01:02:03\n[ipv4]\nmethod=manual\naddress1=10.20.0.31/24,10.20.0.1\ndns=10.20.0.1;\n' > $K/ens192.nmconnection
+run $T
+grep -q '^interface-name=eth1$' $K/ens192.nmconnection && ok "static profile -> eth1 (private NIC, by MAC)" || bad "$(cat $K/ens192.nmconnection)"
+grep -q '^address1=10.20.0.31/24$' $K/ens192.nmconnection && ok "gateway stripped from address1" || bad "address1: $(grep address1 $K/ens192.nmconnection)"
+grep -q '^never-default=true$' $K/ens192.nmconnection && ok "never-default" || bad "no never-default"
+grep -q '^interface-name=eth0$' $K/v2v-eth0.nmconnection 2>/dev/null && grep -q '^method=auto' $K/v2v-eth0.nmconnection && ok "DHCP profile for eth0 (public)" || bad "no DHCP profile: $(ls $K)"
+cp -r $K $W/mrh1; run $T; diff -r $W/mrh1 $K >/dev/null && ok "idempotent" || bad "second run changed: $(diff -r $W/mrh1 $K)"
+
+echo "== map: debian ifupdown, 2 NICs (load balancer)"; T=$W/mdeb; mkdir -p $T/root/etc/network/interfaces.d; nicm $T ens3 $A; nicm $T ens4 $B; map $T 10.20.0.10/24
+cat > $T/root/etc/network/interfaces <<'EOF'
+source /etc/network/interfaces.d/*
+auto lo
+iface lo inet loopback
+allow-hotplug ens192
+iface ens192 inet dhcp
+allow-hotplug ens224
+iface ens224 inet static
+    address 10.20.0.10/24
+    gateway 10.20.0.1
+EOF
+run $T; F=$T/root/etc/network/interfaces
+awk '/^iface ens4/{s=1} s&&/address 10.20.0.10/{print "y"; exit}' $F | grep -q y && ok "static stanza -> ens4 (by MAC)" || bad "$(cat $F)"
+grep -q '^iface ens3 inet dhcp$' $F && ok "dhcp stanza -> ens3 (public)" || bad "dhcp: $(cat $F)"
+grep -q gateway $F && bad "gateway kept on the private NIC" || ok "gateway dropped"
+grep -qE 'ens192|ens224' $F && bad "stale names left" || ok "no stale names"
+cp $F $W/mdeb1; run $T; cmp -s $W/mdeb1 $F && ok "idempotent" || bad "second run changed config"
+
+echo "== map: ubuntu netplan static with default route"; T=$W/mubu; mkdir -p $T/root/etc/netplan; nicm $T ens3 $A; nicm $T ens4 $B; map $T 10.20.0.21/24
+cat > $T/root/etc/netplan/50-cloud-init.yaml <<'EOF'
+network:
+  version: 2
+  ethernets:
+    ens192:
+      addresses:
+        - 10.20.0.21/24
+      routes:
+        - to: default
+          via: 10.20.0.1
+      nameservers:
+        addresses: [10.20.0.1]
+EOF
+run $T; F=$T/root/etc/netplan/50-cloud-init.yaml
+python3 - $F $T/root/etc/netplan/90-v2v-ens3.yaml <<'EOF' && ok "netplan: static -> ens4 without default route, DHCP file for ens3" || bad "netplan: $(cat $F; cat $T/root/etc/netplan/90-v2v-ens3.yaml)"
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))["network"]["ethernets"]
+assert list(d) == ["ens4"] and d["ens4"]["addresses"] == ["10.20.0.21/24"] and "routes" not in d["ens4"], d
+assert d["ens4"]["nameservers"]["addresses"] == ["10.20.0.1"], d
+assert yaml.safe_load(open(sys.argv[2]))["network"]["ethernets"]["ens3"]["dhcp4"] is True
+EOF
+
+echo "== map: eth0 naming swap (static eth0 -> eth1, public eth0 gets DHCP)"; T=$W/mswap; S=$T/root/etc/sysconfig
+mkdir -p $S/network-scripts; nicm $T eth0 $A; nicm $T eth1 $B; map $T 10.20.0.31/24
+printf 'DEVICE=eth0\nHWADDR=00:50:56:01:02:03\nBOOTPROTO=none\nIPADDR=10.20.0.31\nPREFIX=24\nGATEWAY=10.20.0.1\nONBOOT=yes\n' > $S/network-scripts/ifcfg-eth0
+printf 'NETWORKING=yes\nGATEWAY=10.20.0.1\n' > $S/network
+run $T
+grep -q '^IPADDR=10.20.0.31' $S/network-scripts/ifcfg-eth1 2>/dev/null && grep -q '^DEVICE=eth1' $S/network-scripts/ifcfg-eth1 && ok "ifcfg-eth0 static -> ifcfg-eth1" || bad "$(ls $S/network-scripts; cat $S/network-scripts/*)"
+grep -q '^DEFROUTE=no' $S/network-scripts/ifcfg-eth1 && ! grep -q GATEWAY $S/network-scripts/ifcfg-eth1 $S/network && ok "no gateway, DEFROUTE=no" || bad "gateway: $(cat $S/network-scripts/ifcfg-eth1 $S/network)"
+grep -q '^BOOTPROTO=dhcp' $S/network-scripts/ifcfg-eth0 2>/dev/null && ok "ifcfg-eth0 DHCP (public)" || bad "eth0: $(cat $S/network-scripts/ifcfg-eth0 2>&1)"
+
 [ $fail = 0 ] && echo PASS || { echo FAILED; exit 1; }

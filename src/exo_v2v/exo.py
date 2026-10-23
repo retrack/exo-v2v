@@ -44,10 +44,13 @@ class Exo:
 
     # --- instances ---
     def instance_create(self, name, template, itype, disk_gb, security_groups, user_data, labels,
-                        ssh_keys=(), secureboot=False, tpm=False, template_visibility="public"):
+                        ssh_keys=(), secureboot=False, tpm=False, template_visibility="public",
+                        anti_affinity_groups=()):
         args = ["compute", "instance", "create", name, "-z", self.zone, "--template", template,
                 "--instance-type", itype, "--disk-size", str(disk_gb),
                 "--cloud-init", user_data, "--cloud-init-compress"]
+        for g in anti_affinity_groups:      # create-time only on Exoscale
+            args += ["--anti-affinity-group", g]
         if template_visibility != "public":
             args += ["--template-visibility", template_visibility]
         if secureboot:
@@ -106,6 +109,17 @@ class Exo:
             args += ["--template-visibility", template_visibility]
         return self.run(*args, json_out=False)
 
+    def instance_nics(self, name):
+        """[{"network": "public" | private network id, "mac"}] in the order the
+        instance sees them (the CLI's `instance show` has no MACs; the API does)."""
+        raw = self.run("x", "get-instance", self.instance(name)["id"], "--zone", self.zone, json_out=False)
+        d = json.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+        return ([{"network": "public", "mac": d["mac-address"]}] if d.get("mac-address") else []) + \
+            [{"network": p["id"], "mac": p["mac-address"]} for p in d.get("private-networks", [])]
+
+    def instance_rename(self, name, new):
+        return self.run("compute", "instance", "update", name, "-z", self.zone, "--name", new, json_out=False)
+
     def instance_delete(self, name):
         return self.run("compute", "instance", "delete", name, "-z", self.zone, "-f", json_out=False)
 
@@ -147,6 +161,39 @@ class Exo:
         for k, v in labels.items():
             args += ["--label", f"{k}={v}"]
         return self.run(*args, json_out=False)
+
+    # --- private networks / anti-affinity groups ---
+    def privnet(self, name):
+        return self.run("compute", "private-network", "show", name, "-z", self.zone)
+
+    def privnet_create(self, name, start_ip, end_ip, netmask, description="exo-v2v"):
+        return self.run("compute", "private-network", "create", name, "-z", self.zone, "--start-ip", start_ip,
+                        "--end-ip", end_ip, "--netmask", netmask, "--description", description)
+
+    def privnet_attach(self, instance, network, ip=None):
+        args = ["compute", "instance", "private-network", "attach", instance, network, "-z", self.zone]
+        if ip:
+            args += ["--ip", ip]            # static lease (managed private networks)
+        return self.run(*args, json_out=False)
+
+    def privnet_delete(self, name):
+        return self.run("compute", "private-network", "delete", name, "-z", self.zone, "-f", json_out=False)
+
+    def aag(self, name):
+        return self.run("compute", "anti-affinity-group", "show", name)
+
+    def aag_create(self, name):
+        return self.run("compute", "anti-affinity-group", "create", name, "--description", "exo-v2v")
+
+    def aag_delete(self, name):
+        return self.run("compute", "anti-affinity-group", "delete", name, "-f", json_out=False)
+
+    def exists(self, kind, name):
+        try:
+            {"privnet": self.privnet, "aag": self.aag, "sg": self.sg, "instance": self.instance}[kind](name)
+            return True
+        except ExoError:
+            return False
 
     # --- security groups ---
     def sg_create(self, name):

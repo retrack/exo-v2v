@@ -9,9 +9,11 @@
     GET  /status                    disks, sizes, serials, bytes written, convert state
     GET  /hashmap?export=sda&chunk=64M   per-chunk sha256 (compare with cbtsim.py hashmap)
     GET  /preflight                 4Kn compatibility of the data volumes (read-only)
-    POST /convert                   virt-v2v-in-place on all disks (nested KVM if present),
+    POST /convert {"netmap": [...]} virt-v2v-in-place on all disks (nested KVM if present),
                                     then 4Kn partition-table adaptation of the data
-                                    volumes and the first-boot network fix (guestfix.py)
+                                    volumes and the first-boot network fix (guestfix.py;
+                                    netmap: [{"mac", "mode": static|dhcp, "ip", "prefix",
+                                    "nogw"}] for the instance's NICs, public first)
     GET  /convert                   conversion state, per-step results, problems, log tail
     POST /relayout {"spares": {"sdb": "/dev/vdc", ...}}   rebuild 512-only filesystems (XFS
                                     sectsz=512, ext 1K - partitions or LVs) of data volumes onto
@@ -154,7 +156,7 @@ def device_exports(exports):
     return {"sda": exports["sda"], **data_exports(exports)}
 
 
-def run_convert(exports):
+def run_convert(exports, netmap=None):
     STATE["convert"] = {"state": "running", "started": time.time(), "step": "virt-v2v", "problems": []}
     st = STATE["convert"]
     env = dict(os.environ, LIBGUESTFS_BACKEND="direct")
@@ -203,7 +205,7 @@ def run_convert(exports):
         for k, r in st["adapt"].items():
             st["problems"] += [f"{k}: {p}" for p in r["problems"]]
         st["step"] = "netfix"
-        st["netfix"] = guestfix.netfix(exports["sda"])
+        st["netfix"] = guestfix.netfix(exports["sda"], netmap)
         subprocess.call(["sync"])
         st.update(state="done", step="", ended=time.time())
     except Exception as e:  # e.g. virt-v2v-in-place not installed, rc != 0
@@ -304,7 +306,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/convert":
             if STATE["convert"]["state"] == "running":
                 return self._json({"error": "already running"}, 409)
-            threading.Thread(target=run_convert, args=(self.exports,), daemon=True).start()
+            n = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            threading.Thread(target=run_convert, args=(self.exports, body.get("netmap")), daemon=True).start()
             self._json({"state": "running"}, 202)
         elif u.path == "/meta":
             # Per-export sync metadata, e.g. {"change_id": "<VMware changeId>"}.

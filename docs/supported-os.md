@@ -1,6 +1,6 @@
 # Supported operating systems
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v converts guests with
 [`virt-v2v-in-place`](https://libguestfs.org/virt-v2v-in-place.1.html), so it
@@ -47,6 +47,22 @@ hash-compared before conversion):
 |---|---|---|
 | 4 disks on 3 controllers (2 paravirtual SCSI, NVMe) | Root volume group on the system disk; XFS data disk; a volume group over a GPT partition of one disk and the whole NVMe disk, with an XFS logical volume spanning both and an ext4 one | Pass: the XFS data disk and the spanning logical volume rebuilt with 4 KiB sectors (across two new volumes, same LVM and filesystem UUIDs), every file intact |
 | Root volume group extended onto a second disk, data disk grown before the migration | Replication through a 3-level snapshot chain, then between cycles: a middle snapshot deleted, a revert to a snapshot, the data disk grown, the system disk grown, a disk hot-added | Pass: the second disk carried inside the root disk; the revert copied the allocated areas again (the reverted file is absent, the later ones present); the data volume resized; the receiver reset with a bigger root disk; a volume added for the new disk |
+
+### An application moved as a group
+
+A 5-VM application was moved with `exo-v2v group` (tiers, private network with
+the VMs' static addresses, health checks), three times:
+
+| VM | Guest | Network configuration on VMware | Result |
+|---|---|---|---|
+| Load balancer | Debian 13, HAProxy | ifupdown, a DHCP front NIC and a static back NIC | Front NIC on the public interface, back NIC on the private network with its address |
+| 2 application servers | AlmaLinux 9 (NetworkManager, `eth0` naming), Ubuntu 24.04 (netplan) | Static address, default route via the on-premises gateway | Address kept on the private network, default route moved to the public interface |
+| Database | AlmaLinux 9, PostgreSQL on an XFS data disk with 512-byte sectors | Static address | Same; data disk rebuilt for 4 KiB sectors, every row present |
+| Windows member | Windows Server 2022 | Static address | Address set on the private network adapter at first boot |
+
+Window (first VM stopped to last tier healthy): 461 s for 4 VMs, 486 s for 5.
+A conversion failure injected on one member stopped the group, and
+`group rollback` brought the application back on VMware without losing data.
 
 A Windows Server 2022 VM with a spanned dynamic volume over two disks lost
 that volume on Exoscale, as expected (see [Limitations](limitations.md)); its

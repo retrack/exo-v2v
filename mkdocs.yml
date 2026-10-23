@@ -32,6 +32,8 @@ nav:
       - Prerequisites: prerequisites.md
       - IAM role: iam.md
       - Operations runbook: OPERATIONS.md
+      - Moving an application: groups.md
+      - Web status page: web.md
   - Reference:
       - Supported operating systems: supported-os.md
       - Limitations: limitations.md

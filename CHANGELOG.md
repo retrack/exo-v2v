@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.3.0 — 2026-10-23
+
+Experimental release: applications moved as a whole, private networks, a
+read-only status page.
+
+- **Groups (`exo-v2v group`).** Several VMs, for example a load balancer,
+  application servers and databases, replicated together and cut over in one
+  window. A YAML manifest (`group discover` drafts it from vSphere) sets the
+  tiers, the network mapping, security groups, anti-affinity groups, health
+  checks and hooks. The cutover stops the tiers front to back, starts each
+  member's final copy and conversion as soon as it is off, converts all members
+  in parallel, then starts the tiers back to front with health checks (TCP,
+  HTTP, command) between them. `pre_cutover` / `post_cutover` hooks,
+  `max_window`, `rollback_on_failure`. Resumable: the group and each member
+  record their steps; members run as child processes that survive the group
+  process. `group rollback` stops the Exoscale instances and powers the sources
+  on, back end first; members not converted yet keep syncing. `group cleanup`
+  renames instances to their final names.
+- **Private networks with the VMs' addresses.** A vSphere port group maps to
+  the public interface or an Exoscale managed private network. `create`
+  attaches each private network with the VM's address as a static lease and
+  records the NIC MACs; the conversion passes a map by MAC to the guest's
+  first-boot network fix, which moves each static configuration to its new NIC
+  (ifupdown, netplan, NetworkManager, ifcfg; `eth0` → `eth1` swaps included),
+  drops its gateway (the default route goes through the public interface), and
+  writes DHCP configurations for mapped NICs left without one. Windows: a
+  first-boot task sets the static addresses on the adapters by MAC.
+- **`exo-v2v web`**: a read-only status page (and JSON API) of every migration
+  and group: phases, cycles, cutover steps, downtime, member logs. GET only, no
+  credentials, no external assets; loopback by default, a token otherwise.
+- **Resumable single cutover.** `cutover` records its steps (source off, final
+  cycle, conversion, rebuilds, flush, restart) and continues after an
+  interruption without converting twice; `cutover --no-start` stops after the
+  conversion. `rollback` before the conversion keeps the receiver, and `sync`
+  continues.
+- `cleanup --rename NEW`; the VM inventory records port groups, guest
+  addresses and default gateways.
+- IAM role: private networks, anti-affinity groups, `update-instance` (rename)
+  and `v2v-*` security groups. Update an existing role with the new
+  `docs/iam/exo-v2v-appliance-policy.json`.
+- New dependency: PyYAML.
+
 ## 0.2.0 — 2026-10-21
 
 Experimental release: multi-disk VMs, LVM and VMDK chains.

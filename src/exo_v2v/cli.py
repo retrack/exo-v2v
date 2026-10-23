@@ -8,7 +8,9 @@ Workflow (each step is resumable; state in ~/.exo-v2v/<name>/):
   exo-v2v cutover  NAME [--verify]      # final cycle (VM powered off), convert, start on Exoscale
   exo-v2v status   [NAME]
   exo-v2v rollback NAME                 # power the source VM back on; receiver stopped
-  exo-v2v cleanup  NAME [--delete-rollback-volumes] [--delete-instance]
+  exo-v2v cleanup  NAME [--delete-rollback-volumes] [--delete-instance] [--rename NEW]
+  exo-v2v group    discover|plan|create|sync|cutover|status|rollback|cleanup GROUP ...
+  exo-v2v web      [--listen 127.0.0.1:8780]   # read-only status page
 
 vSphere connection: VSPHERE_HOST, VSPHERE_USER, VSPHERE_PASSWORD (env) or
 --vsphere-host/--vsphere-user; vCenter or standalone ESXi. Run sync/cutover as
@@ -16,6 +18,7 @@ root inside the replication appliance VM (hot-add transport).
 Exoscale: the `exo` CLI's configured account (exo config) or --account.
 """
 import argparse
+import json
 import os
 import signal
 import subprocess
@@ -142,7 +145,8 @@ def cmd_create(a):
         log(f"creating {name} ({p['template']}, {p['convert_type']}, {p['root_gb']} GB{extra})")
         inst = ex.instance_create(name, p["template"], p["convert_type"], p["root_gb"], [sg], ud, labels,
                                   secureboot=p.get("secure_boot", False), tpm=p.get("tpm", False),
-                                  template_visibility=p.get("template_visibility", "public"))
+                                  template_visibility=p.get("template_visibility", "public"),
+                                  anti_affinity_groups=p.get("anti_affinity_groups", []))
     finally:
         os.unlink(ud)
     st.data["receiver"].update(id=inst.get("id"), ip=inst.get("ip_address"))
@@ -153,6 +157,7 @@ def cmd_create(a):
         # the firmware/GRUB still loads the RAM root can hang the boot
         wait_ssh(tunnel_for(st), a.timeout)
         log("receiver template booted into RAM")
+    attach_networks(st, ex)
     for i, d in enumerate((d for d in p["disks"] if d["role"] == "volume"), 1):
         vname = f"v2v-{a.name}-d{i}"   # `v2v-` prefix: the IAM template scopes volumes by name
         add_volume(st, ex, vname, d["size_gb"], d["export"])
@@ -165,6 +170,39 @@ def cmd_create(a):
             win_support(t)          # staged now: not part of the cutover downtime
     st.set_phase("receiver-ready")
     print(f"receiver {name} ready at {st['receiver']['ip']}")
+
+
+def attach_networks(st, ex):
+    """Private networks of the plan, attached in order (the guest's NICs after
+    the public one), each address as a static lease; their MACs, known from now
+    on, drive the guest's network fix-up at cutover."""
+    p, r = st["plan"], st["receiver"]
+    nets = [n for n in p.get("networks", []) if n["network"] != "public"]
+    if not nets:
+        return
+    have = {n["network"] for n in r.get("nics", [])}
+    for n in nets:
+        if n["network"] not in have:
+            ex.privnet_attach(r["name"], n["network"], n.get("ip"))
+            log(f"private network {n['network']} attached" + (f" ({n['ip']}, static lease)" if n.get("ip") else ""))
+    ids = {ex.privnet(n["network"])["id"]: n["network"] for n in nets}
+    r["nics"] = [{**x, "network": ids.get(x["network"], x["network"])} for x in ex.instance_nics(r["name"])]
+    st.save()
+
+
+def netmap_of(st):
+    """Target NICs for the guest's network fix-up: [{"mac", "mode", "ip", "prefix", "nogw"}]."""
+    p, r = st["plan"], st["receiver"]
+    macs = {n["network"]: n["mac"] for n in r.get("nics", [])}
+    out = []
+    for n in p.get("networks", []):
+        if not macs.get(n["network"]):
+            die(f"the receiver has no NIC on {n['network']} (`exo-v2v create` attaches it)")
+        e = {"mac": macs[n["network"]], "mode": n["mode"]}
+        if n.get("ip"):
+            e.update(ip=n["ip"], prefix=n["prefix"], nogw=bool(n.get("nogw")))
+        out.append(e)
+    return out
 
 
 def wait_ssh(t, timeout):
@@ -404,20 +442,24 @@ def run_cycle(st, a, V, vc, vm, proxy, t, full=False, final=False):
     return cyc
 
 
-def migration_lock(st):
+def migration_lock(st, what):
     """One sync/cutover per migration at a time (the sweep and the receiver's
-    changeId assume a single writer)."""
+    changeId assume a single writer). The holder's pid goes into the file: the
+    web page reads it (it never takes the lock)."""
     import fcntl
-    lk = open(os.path.join(st.dir, ".lock"), "w")
+    lk = open(os.path.join(st.dir, ".lock"), "a+")
     try:
         fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         die(f"another exo-v2v sync/cutover of {st.name} is running")
+    lk.seek(0); lk.truncate()
+    lk.write(json.dumps({"pid": os.getpid(), "what": what, "since": time.time()}))
+    lk.flush()
     st._lock = lk
 
 
-def sender_context(a, st):
-    migration_lock(st)
+def sender_context(a, st, what):
+    migration_lock(st, what)
     V, vc = vsphere_connect(a)
     vm = vc.vm(st["plan"]["vm"])
     proxy = None
@@ -439,7 +481,7 @@ def cmd_sync(a):
     st = State.load(a.name)
     if st["phase"] not in ("receiver-ready", "syncing"):
         die(f"phase is {st['phase']}: sync needs a ready receiver")
-    V, vc, vm, proxy = sender_context(a, st)
+    V, vc, vm, proxy = sender_context(a, st, "sync")
     ex = exo_for(st, a)
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True) or log("stopping after this cycle"))
@@ -512,8 +554,13 @@ def relayout_group(st, ex, t, exports):
         size = volume_size_gb(ex.volume(vol["name"]))
         spare = f"{vol['name']}-4k"
         log(f"{export}: rebuilding 512-byte-sector filesystems onto new 4K volume {spare}")
-        ex.volume_create(spare, size, {LABEL: st.name})
-        ex.volume_attach(spare, r["name"])
+        try:          # left by an interrupted cutover: reused, rebuilt again from scratch
+            attached = ex.volume(spare).get("state") == "attached"
+        except ExoError:
+            ex.volume_create(spare, size, {LABEL: st.name})
+            attached = False
+        if not attached:
+            ex.volume_attach(spare, r["name"])
         spares[export] = (vol, spare, wait_device(t, ex.volume(spare)["id"][:20]))
     t.post("/relayout", {"spares": {e: dev for e, (_v, _s, dev) in spares.items()}})
     while any(t.get("/relayout")[e]["state"] == "running" for e in exports):
@@ -533,76 +580,156 @@ def relayout_group(st, ex, t, exports):
             f"original kept as rollback")
 
 
-def cmd_cutover(a):
-    st = State.load(a.name)
-    if st["phase"] not in ("syncing", "receiver-ready", "cutover"):
-        die(f"phase is {st['phase']}")
-    p, r = st["plan"], st["receiver"]
-    ex = exo_for(st, a)
-    V, vc, vm, proxy = sender_context(a, st)
-    reconcile_disks(st, a, ex, V, vm)    # before the downtime starts
-    t_down = time.time()
-    try:
-        with tunnel_for(st) as t:
-            st.set_phase("cutover")
-            cyc = run_cycle(st, a, V, vc, vm, proxy, t, final=True)
-            log(f"final cycle: {cyc.get('power')}, {cyc['seconds']}s")
-            if a.verify:
-                res = V.verify(vc, vm, mapping_of(st), t.api, transport=a.transport, proxy=proxy)
-                if any(x["mismatched"] for x in res.values()):
-                    die(f"VERIFY FAILED: {res}. Source stays off; run `exo-v2v rollback {a.name}` to restart it")
-            if p["os_family"] == "windows":
-                win_support(t)      # no-op when staged at create time
-            log("converting (virt-v2v-in-place on the receiver, then 4Kn + network fix-ups)")
-            t.post("/convert")
+def group_guard(st, a, what):
+    g = st.data.get("group")
+    if g and not getattr(a, "in_group", False):
+        die(f"{st.name} is a member of group {g}: use `exo-v2v group {what} {g}`")
+
+
+def convert(st, ex, t):
+    """Conversion on the receiver (virt-v2v-in-place, 4Kn adaptation, network
+    fix-up), then the volume rebuilds and a flush. Resumes after an interruption:
+    a conversion that already finished is not run again."""
+    steps = st.data["cutover_steps"]
+    if "converted" not in steps:
+        c = t.get("/convert")
+        if c["state"] == "done" and steps.get("convert_started"):
+            log("conversion already done on the receiver")
+        else:
+            if c["state"] == "failed":
+                log(f"the previous conversion failed ({c.get('error')}): running it again")
+            if c["state"] != "running":
+                log("converting (virt-v2v-in-place on the receiver, then 4Kn + network fix-ups)")
+                steps["convert_started"] = time.time()
+                st.save()
+                t.post("/convert", {"netmap": netmap_of(st)})
             while (c := t.get("/convert"))["state"] == "running":
                 time.sleep(15)
-            st.data["convert"] = {k: c.get(k) for k in ("state", "rc", "error", "problems", "adapt", "netfix")}
-            st.save()
-            if c["state"] != "done":
-                die(f"conversion failed: {c.get('error')}\n" + "\n".join(c.get("log_tail", [])[-15:]))
-            if c.get("fold"):
-                log(f"folded into the root disk: {c['fold']['added']}")
-            groups = c.get("relayout_groups") or []
-            grouped = {e for g in groups for e in g}
-            for export, probs in (c.get("unfixable") or {}).items():
-                st.event(f"{export}: left as is: {probs}")
-                log(f"WARNING {export}: {'; '.join(probs)} — not rebuilt; check it in the guest")
-            for export, v in (c.get("adapt") or {}).items():
-                rest = [x for x in v.get("problems", []) if export not in grouped and
-                        x not in (c.get("unfixable") or {}).get(export, [])]
-                if rest:
-                    st.event(f"{export}: {rest}")
-                    log(f"WARNING {export}: {'; '.join(rest)}")
-            for g in sorted(groups, key=len):
-                relayout_group(st, ex, t, g)
-            t.post("/flush")
-    finally:
-        vc.close()
-    st.set_phase("converted")
-    log(f"restarting {r['name']} from its own disks")
-    ex.instance_stop(r["name"])
-    if p["target_type"] != p["convert_type"]:
-        log(f"scaling {p['convert_type']} -> {p['target_type']}")
-        ex.instance_scale(r["name"], p["target_type"])
-    ex.instance_start(r["name"])
-    for sg in p["security_groups"]:
-        ex.instance_sg_add(r["name"], sg)
-    port = 3389 if p["os_family"] == "windows" else 22
-    if port == 3389:
+        st.data["convert"] = {k: c.get(k) for k in ("state", "rc", "error", "problems", "adapt", "netfix")}
+        st.save()
+        if c["state"] != "done":
+            die(f"conversion failed: {c.get('error')}\n" + "\n".join(c.get("log_tail", [])[-15:]))
+        if c.get("fold"):
+            log(f"folded into the root disk: {c['fold']['added']}")
+        st.data["relayout_groups"] = c.get("relayout_groups") or []
+        grouped = {e for g in st.data["relayout_groups"] for e in g}
+        for export, probs in (c.get("unfixable") or {}).items():
+            st.event(f"{export}: left as is: {probs}")
+            log(f"WARNING {export}: {'; '.join(probs)} — not rebuilt; check it in the guest")
+        for export, v in (c.get("adapt") or {}).items():
+            rest = [x for x in v.get("problems", []) if export not in grouped and
+                    x not in (c.get("unfixable") or {}).get(export, [])]
+            if rest:
+                st.event(f"{export}: {rest}")
+                log(f"WARNING {export}: {'; '.join(rest)}")
+        steps["converted"] = time.time()
+        st.save()
+    vols = {v["export"]: v for v in st["receiver"]["volumes"]}
+    for g in sorted(st.data.get("relayout_groups", []), key=len):
+        if not all(vols[e].get("rollback") for e in g):      # not swapped yet
+            relayout_group(st, ex, t, g)
+    t.post("/flush")
+    steps["flushed"] = time.time()
+    st.save()
+
+
+def cmd_cutover(a):
+    st = State.load(a.name)
+    group_guard(st, a, "cutover")
+    if st["phase"] not in ("syncing", "receiver-ready", "cutover", "converted"):
+        die(f"phase is {st['phase']}")
+    ex = exo_for(st, a)
+    steps = st.data.setdefault("cutover_steps", {})
+    if st["phase"] != "converted":
+        V, vc, vm, proxy = sender_context(a, st, "cutover")
         try:
-            ex.sg_rule_add(r["sg"], r["sender_cidr"], 3389, desc="exo-v2v sender (RDP check)")
-        except ExoError:
-            pass
-    up = wait_port(r["ip"], port, a.boot_timeout)
-    st.data["downtime_s"] = round((up or time.time()) - t_down)
-    st.set_phase("done")
+            if "down_at" not in steps:
+                reconcile_disks(st, a, ex, V, vm)    # before the downtime starts
+            with tunnel_for(st) as t:
+                if st["phase"] != "cutover":
+                    st.set_phase("cutover")
+                if "final_cycle" not in steps:
+                    if "source_off" not in steps:
+                        steps["down_at"] = steps.get("down_at") or time.time()
+                        st.save()
+                        steps["power"] = V.power_off(vm, a.shutdown_timeout)
+                        steps["source_off"] = time.time()
+                        st.event(f"source VM off ({steps['power']})")
+                        log(f"source VM {vm.name}: {steps['power']}")
+                    cyc = run_cycle(st, a, V, vc, vm, proxy, t, final=True)
+                    steps["final_cycle"] = time.time()
+                    st.save()
+                    log(f"final cycle: {cyc['seconds']}s")
+                if a.verify and "verified" not in steps:
+                    res = V.verify(vc, vm, mapping_of(st), t.api, transport=a.transport, proxy=proxy)
+                    if any(x["mismatched"] for x in res.values()):
+                        die(f"VERIFY FAILED: {res}. Source stays off; run `exo-v2v rollback {a.name}` to restart it")
+                    steps["verified"] = time.time()
+                    st.save()
+                if st["plan"]["os_family"] == "windows":
+                    win_support(t)      # no-op when staged at create time
+                convert(st, ex, t)
+        finally:
+            vc.close()
+        st.set_phase("converted")
+    if a.no_start:
+        log(f"{st.name}: converted; the instance is not restarted yet (--no-start)")
+        return
+    stop_and_scale(st, ex)
+    up = start_instance(st, ex, a.boot_timeout)
+    r = st["receiver"]
+    port = 3389 if st["plan"]["os_family"] == "windows" else 22
     print(f"cutover {'complete' if up else 'finished, but port %d not reachable yet' % port}: "
           f"{r['name']} {r['ip']} — downtime {st['downtime_s']}s (source shutdown -> port {port} open)")
     if port == 3389:
         print("note: Windows keeps installing drivers for a few minutes (it may reboot); data disks "
               "come online when that finishes (C:\\Program Files\\Guestfs\\Firstboot\\log.txt)")
     print(f"next: test the workload, then `exo-v2v cleanup {a.name}` (or `rollback`)")
+
+
+def stop_and_scale(st, ex):
+    """Converted receiver -> stopped instance of the target type (idempotent)."""
+    p, r = st["plan"], st["receiver"]
+    steps = st.data.setdefault("cutover_steps", {})
+    if "stopped" not in steps:
+        log(f"restarting {r['name']} from its own disks")
+        if ex.instance(r["name"]).get("state") != "stopped":
+            ex.instance_stop(r["name"])
+        steps["stopped"] = time.time()
+        st.save()
+    if p["target_type"] != p["convert_type"] and "scaled" not in steps:
+        log(f"scaling {p['convert_type']} -> {p['target_type']}")
+        ex.instance_scale(r["name"], p["target_type"])
+        steps["scaled"] = time.time()
+        st.save()
+
+
+def start_instance(st, ex, boot_timeout, extra_ports=()):
+    """Start the migrated instance, attach its security groups, wait for SSH/RDP
+    (reached from here through the migration's own group). Returns the time
+    the port answered, or None."""
+    p, r = st["plan"], st["receiver"]
+    steps = st.data["cutover_steps"]
+    if ex.instance(r["name"]).get("state") != "running":
+        ex.instance_start(r["name"])
+    for sg in p["security_groups"]:
+        if sg not in (ex.instance(r["name"]).get("security_groups") or []):
+            ex.instance_sg_add(r["name"], sg)
+    port = 3389 if p["os_family"] == "windows" else 22
+    for x in ([3389] if port == 3389 else []) + list(extra_ports):
+        if x not in r.setdefault("sg_ports", []):
+            try:
+                ex.sg_rule_add(r["sg"], r["sender_cidr"], x, desc=f"exo-v2v sender (check port {x})")
+            except ExoError:
+                pass
+            r["sg_ports"].append(x)
+    st.save()
+    up = wait_port(r["ip"], port, boot_timeout)
+    t_down = steps.get("down_at") or steps.get("source_off") or time.time()
+    st.data["downtime_s"] = round((up or time.time()) - t_down)
+    steps["started"] = time.time()
+    st.set_phase("done")
+    return up
 
 
 def wait_port(host, port, timeout):
@@ -623,7 +750,8 @@ def cmd_status(a):
         st = State.load(n)
         p, r = st["plan"], st["receiver"]
         last = st["cycles"][-1] if st["cycles"] else None
-        print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}) in {p['zone']}  phase={st['phase']}")
+        grp = f"  group={st['group']}" if st.data.get("group") else ""
+        print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}) in {p['zone']}  phase={st['phase']}{grp}")
         if last:
             age = int(time.time() - last["t"])
             print(f"  cycles={len(st['cycles'])} last={age}s ago "
@@ -634,25 +762,47 @@ def cmd_status(a):
             print_plan(p)
 
 
+def rollback(st, a, V, vc, wait_tools=0):
+    """Source VM back on. Before the conversion started the receiver is still a
+    replica: it keeps running and `sync` continues (CBT goes on from the last
+    cycle). After it, the receiver is stopped (its disks are converted)."""
+    steps = st.data.get("cutover_steps", {})
+    ex = exo_for(st, a)
+    r = st["receiver"]
+    converted = bool(steps.get("convert_started")) or st["phase"] in ("converted", "done")
+    if converted and r.get("name") and ex.instance_exists(r["name"]):
+        if ex.instance(r["name"]).get("state") != "stopped":
+            ex.instance_stop(r["name"])
+        log(f"{st.name}: instance {r['name']} stopped (delete it with cleanup --delete-instance)")
+    vm = vc.vm(st["plan"]["vm"])
+    waited = V.power_on(vm, wait_tools) if wait_tools else None
+    if not wait_tools and str(vm.runtime.powerState) != "poweredOn":
+        V.WaitForTask(vm.PowerOnVM_Task())
+    log(f"{st.name}: source VM {vm.name} on" + (f" (VMware Tools up after {waited}s)" if waited else ""))
+    if converted:
+        st.set_phase("rolled-back")
+    else:
+        st.data["cutover_steps"] = {}
+        st.set_phase("syncing" if st["cycles"] else "receiver-ready")
+        log(f"{st.name}: the receiver was not converted: `sync` continues from the last cycle")
+
+
 def cmd_rollback(a):
     st = State.load(a.name)
+    if st.data.get("group"):
+        log(f"{st.name} belongs to group {st['group']}: rolling back this member only")
     V, vc = vsphere_connect(a)
     try:
-        vm = vc.vm(st["plan"]["vm"])
-        if str(vm.runtime.powerState) != "poweredOn":
-            V.WaitForTask(vm.PowerOnVM_Task())
-            log(f"source VM {vm.name} powered on")
+        rollback(st, a, V, vc)
     finally:
         vc.close()
-    ex = exo_for(st, a)
-    if st["receiver"].get("name") and ex.instance_exists(st["receiver"]["name"]):
-        ex.instance_stop(st["receiver"]["name"])
-        log(f"receiver {st['receiver']['name']} stopped (delete it with cleanup --delete-instance)")
-    st.set_phase("rolled-back")
 
 
 def cmd_cleanup(a):
-    st = State.load(a.name)
+    cleanup(State.load(a.name), a)
+
+
+def cleanup(st, a):
     ex = exo_for(st, a)
     r = st["receiver"]
     if a.delete_instance and r.get("name") and ex.instance_exists(r["name"]):
@@ -683,6 +833,11 @@ def cmd_cleanup(a):
         log(f"deleted security group {r['sg']}")
     except (ExoError, KeyError):
         pass
+    new = getattr(a, "rename", None) or st["plan"].get("final_name")
+    if new and not a.delete_instance and st["phase"] == "done" and r.get("name") != new:
+        ex.instance_rename(r["name"], new)     # hand-over: out of the appliance role's `v2v-` scope
+        log(f"instance {r['name']} renamed {new}")
+        r["name"] = new
     st.set_phase("cleaned")
 
 
@@ -721,6 +876,7 @@ def main(argv=None):
         s.add_argument("--timeout", type=int, default=1800,
                        help="receiver readiness timeout when it must be reset (a grown system disk)")
         s.set_defaults(fn=fn)
+        s.add_argument("--in-group", action="store_true", help=argparse.SUPPRESS)
         if nm == "sync":
             s.add_argument("--full", action="store_true")
             s.add_argument("--every", type=int, help="repeat every N seconds (Ctrl-C stops after the cycle)")
@@ -728,6 +884,8 @@ def main(argv=None):
         else:
             s.add_argument("--verify", action="store_true", help="hash-compare source and receiver (adds downtime)")
             s.add_argument("--boot-timeout", type=int, default=900)
+            s.add_argument("--no-start", action="store_true",
+                           help="stop after the conversion (the instance is started later)")
 
     s = sub.add_parser("status"); s.add_argument("name", nargs="?"); s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(fn=cmd_status)
@@ -735,8 +893,12 @@ def main(argv=None):
     s = sub.add_parser("cleanup"); s.add_argument("name")
     s.add_argument("--delete-rollback-volumes", action="store_true")
     s.add_argument("--delete-instance", action="store_true", help="delete the receiver/instance and its volumes")
+    s.add_argument("--rename", metavar="NEW", help="rename the migrated instance (hand-over)")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_cleanup)
     s = sub.add_parser("list"); s.set_defaults(fn=lambda a: [print(n) for n in State.all()])
+    from . import group, web
+    group.add_parser(sub)
+    web.add_parser(sub)
 
     a = ap.parse_args(argv)
     try:

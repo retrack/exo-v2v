@@ -824,22 +824,34 @@ NETFIX_SH = r'''#!/bin/sh
 # v2v-netfix — installed by the VMware->Exoscale receiver. Every boot, before
 # networking: re-point interface configs written for VMware NIC names/MACs at
 # the NICs that exist now. Idempotent; log /var/log/v2v-netfix.log.
+# /etc/v2v-netfix.map (from the migration plan), one line per Exoscale NIC:
+#   <mac> static <addr>/<len> [nogw]   the config holding <addr> moves to this NIC
+#   <mac> dhcp                         this NIC gets a DHCP config if it has none
 R="${V2V_ROOT:-}"; SYS="${V2V_SYS:-/sys}"
 LOG="$R/var/log/v2v-netfix.log"; mkdir -p "$R/var/log"
 exec >>"$LOG" 2>&1
 echo "== $(date -Is 2>/dev/null || date) v2v-netfix"
+MAP="$R/etc/v2v-netfix.map"
+macof() { tr 'A-Z' 'a-z' < "$SYS/class/net/$1/address" 2>/dev/null; }
+want=$( [ -f "$MAP" ] && awk '$1 !~ /^#/ && NF >= 2 {print tolower($1)}' "$MAP")
 i=0
-while [ $i -lt 30 ]; do
-  for d in "$SYS"/class/net/*/device; do [ -e "$d" ] && break 2; done
+while [ $i -lt 30 ]; do   # the NICs (every NIC of the map) are there
+  up=""; for d in "$SYS"/class/net/*/device; do [ -e "$d" ] && up=1 && break; done
+  if [ -n "$up" ]; then
+    have=$(for d in "$SYS"/class/net/*/device; do [ -e "$d" ] && macof "$(basename "$(dirname "$d")")"; done)
+    for m in $want; do echo "$have" | grep -qx "$m" || up=""; done
+    [ -n "$up" ] && break
+  fi
   sleep 1; i=$((i+1))
 done
 NICS=$(for d in "$SYS"/class/net/*; do [ -e "$d/device" ] && basename "$d"; done | sort)
 [ -n "$NICS" ] || { echo "no NICs found"; exit 0; }
-echo "nics: $(echo $NICS)"
+echo "nics: $(for n in $NICS; do printf '%s=%s ' "$n" "$(macof "$n")"; done)"
 IFUP="$R/etc/network/interfaces $(ls "$R"/etc/network/interfaces.d/* 2>/dev/null)"
 NETPLAN=$(ls "$R"/etc/netplan/*.yaml "$R"/etc/netplan/*.yml 2>/dev/null)
 NMKEY=$(ls "$R"/etc/NetworkManager/system-connections/* 2>/dev/null)
 IFCFG=$(ls "$R"/etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null | grep -v 'ifcfg-lo$')
+NETWORKD=$(ls "$R"/etc/systemd/network/*.network 2>/dev/null)
 names() {
   { for f in $IFUP; do [ -f "$f" ] && awk '$1=="auto"||$1=="allow-hotplug"||$1=="iface"{for(i=2;i<=NF;i++){if($1=="iface"&&i>2)break;print $i}}' "$f"; done
     for f in $NETPLAN; do awk '/^[[:space:]]*ethernets:/{e=1;ind=-1;next} e&&/^[^[:space:]]/{e=0} e&&/^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/{n=match($0,/[^ ]/); if(ind<0)ind=n; if(n==ind){sub(/^[[:space:]]+/,"");sub(/:.*/,"");print}}' "$f"; done
@@ -847,40 +859,127 @@ names() {
     for f in $IFCFG; do sed -n 's/^DEVICE=["]*\([^"]*\)["]*$/\1/p' "$f"; done
   } | grep -v '^lo$' | grep -v ':' | sort -u
 }
+nic_by_mac() { for n in $NICS; do [ "$(macof "$n")" = "$1" ] && { echo "$n"; return; }; done; }
+re_ip() { echo "$1" | sed 's/\./[.]/g'; }
+holder() {   # the configured interface whose static config carries address $1
+  ae=$(re_ip "$1")
+  for f in $IFUP; do [ -f "$f" ] && awk -v re="^$ae(/|\$)" '$1=="iface"{n=$2} $1=="address"&&$2~re{print n; exit}' "$f"; done
+  for f in $NETPLAN; do awk -v re="(^|[^0-9.])$ae/" '/^[[:space:]]*ethernets:/{e=1;ind=-1;next} e&&/^[^[:space:]]/{e=0} e&&/^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/{n=match($0,/[^ ]/); if(ind<0)ind=n; if(n==ind){c=$0;sub(/^[[:space:]]+/,"",c);sub(/:.*/,"",c)}} e&&c!=""&&$0~re{print c; exit}' "$f"; done
+  for f in $NMKEY; do grep -qE "^address[0-9]*=$ae(/|,|\$)" "$f" && sed -n 's/^interface-name=//p' "$f"; done
+  for f in $IFCFG; do grep -qE "^IPADDR[0-9]*=[\"']?$ae[\"']?\$" "$f" && sed -n 's/^DEVICE=["]*\([^"]*\)["]*$/\1/p' "$f"; done
+}
+rename() {
+  for f in $IFUP $NETPLAN $IFCFG $NETWORKD; do [ -f "$f" ] && sed -i -E "s/(^|[^A-Za-z0-9._-])$1([^A-Za-z0-9._-]|$)/\1$2\2/g" "$f"; done
+  for f in $NMKEY; do sed -i "s/^interface-name=$1\$/interface-name=$2/" "$f"; done
+  [ -f "$R/etc/sysconfig/network-scripts/ifcfg-$1" ] && mv "$R/etc/sysconfig/network-scripts/ifcfg-$1" "$R/etc/sysconfig/network-scripts/ifcfg-$2"
+  IFCFG=$(ls "$R"/etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null | grep -v 'ifcfg-lo$')
+}
+# 1. the map: each static address moves to the NIC with its MAC
+CLAIMED=""; DHCPW=""; NOGW=""; RENAMES=""
+if [ -f "$MAP" ]; then
+  while read -r mac kind addr opt; do
+    case "$mac" in ""|\#*) continue;; esac
+    mac=$(echo "$mac" | tr 'A-Z' 'a-z'); new=$(nic_by_mac "$mac")
+    [ -n "$new" ] || { echo "map: no NIC with MAC $mac"; continue; }
+    [ "$kind" = static ] || { DHCPW="$DHCPW $new"; continue; }
+    CLAIMED="$CLAIMED $new"
+    ip=${addr%/*}; ae=$(re_ip "$ip")
+    for f in $NMKEY; do   # a profile bound by MAC only: bind it by name (the VMware MAC pin goes below)
+      grep -qE "^address[0-9]*=$ae(/|,|\$)" "$f" && ! grep -q '^interface-name=' "$f" && sed -i "/^\[connection\]/a interface-name=$new" "$f"
+    done
+    old=$(holder "$ip" | head -1)
+    if [ -z "$old" ]; then
+      echo "map: no config holds $ip: DHCP on $new (its static lease is $ip)"; DHCPW="$DHCPW $new"; continue
+    fi
+    [ "$old" = "$new" ] || RENAMES="$RENAMES $old=$new"
+    [ "$opt" = nogw ] && NOGW="$NOGW $new"
+  done < "$MAP"
+  k=0; for m in $RENAMES; do rename "${m%%=*}" "v2vtmp$k"; k=$((k+1)); done
+  k=0; for m in $RENAMES; do rename "v2vtmp$k" "${m#*=}"; echo "map ${m%%=*} -> ${m#*=} (holds its address)"; k=$((k+1)); done
+fi
+# 2. other stale names -> free NICs (the map's DHCP NICs first: the public one leads)
 CONF=$(names)
 STALE=$(for n in $CONF; do echo "$NICS" | grep -qx "$n" || echo "$n"; done)
-FREE=$(for n in $NICS; do echo "$CONF" | grep -qx "$n" || echo "$n"; done)
+FREE=$(for n in $DHCPW $NICS; do echo "$CONF" | grep -qx "$n" || echo " $CLAIMED " | grep -q " $n " || echo "$n"; done | awk '!s[$0]++')
 echo "configured: $(echo $CONF) stale: $(echo $STALE) free: $(echo $FREE)"
 set -- $FREE
 for old in $STALE; do
   [ $# -gt 0 ] || { echo "no free NIC for $old"; break; }
   new=$1; shift
   echo "map $old -> $new"
-  for f in $IFUP $NETPLAN $IFCFG; do [ -f "$f" ] && sed -i -E "s/(^|[^A-Za-z0-9._-])$old([^A-Za-z0-9._-]|$)/\1$new\2/g" "$f"; done
-  for f in $NMKEY; do sed -i "s/^interface-name=$old\$/interface-name=$new/" "$f"; done
-  [ -f "$R/etc/sysconfig/network-scripts/ifcfg-$old" ] && mv "$R/etc/sysconfig/network-scripts/ifcfg-$old" "$R/etc/sysconfig/network-scripts/ifcfg-$new"
+  rename "$old" "$new"
+done
+# 3. no default route through a private network (no router there): the public NIC has it
+for n in $NOGW; do
+  for f in $IFUP; do [ -f "$f" ] && awk -v n="$n" '$1=="iface"{s=($2==n)} $1~/^(auto|allow-|source|mapping)/{s=0} s&&($1=="gateway"||(($1=="up"||$1=="post-up")&&/default/)){next} {print}' "$f" > "$f.v2v" && cat "$f.v2v" > "$f" && rm -f "$f.v2v"; done
+  for f in $NETPLAN; do awk -v n="$n" '
+    /^[[:space:]]*ethernets:/{e=1;ind=-1;b=0;print;next}
+    e&&/^[^[:space:]]/{e=0;b=0}
+    e&&/^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/{k=match($0,/[^ ]/); if(ind<0)ind=k; if(k==ind){c=$0;sub(/^[[:space:]]+/,"",c);sub(/:.*/,"",c);b=(c==n);skip=0}}
+    b&&skip{k=match($0,/[^ ]/); if(k>skip)next; skip=0}
+    b&&/^[[:space:]]*gateway[46]:/{next}
+    b&&/^[[:space:]]*-[[:space:]]*to:[[:space:]]*[^[:space:]a-z0-9]?(default|0\.0\.0\.0\/0)/{skip=match($0,/-/);next}
+    b&&/\{[^}]*to:[[:space:]]*[^[:space:]a-z0-9]?(default|0\.0\.0\.0\/0)/{next}
+    {print}' "$f" > "$f.v2v" && cat "$f.v2v" > "$f" && rm -f "$f.v2v"; done
+  for f in $NMKEY; do
+    grep -q "^interface-name=$n\$" "$f" || continue
+    sed -i -E -e '/^gateway=/d' -e 's/^(address[0-9]*=[^,]*),.*$/\1/' -e '/^route[0-9]*=(0\.0\.0\.0\/0|default)/d' "$f"
+    grep -q '^never-default=true' "$f" || sed -i '/^\[ipv4\]/a never-default=true' "$f"
+  done
+  f="$R/etc/sysconfig/network-scripts/ifcfg-$n"
+  [ -f "$f" ] && sed -i -E '/^(GATEWAY[0-9]*|DEFROUTE)=/d' "$f" && echo 'DEFROUTE=no' >> "$f"
+  [ -f "$R/etc/sysconfig/network" ] && sed -i -E '/^GATEWAY(DEV)?=/d' "$R/etc/sysconfig/network"
+  for f in $NETWORKD; do grep -q "^Name=$n\$" "$f" && sed -i '/^Gateway=/d' "$f"; done
+  echo "default route not via $n"
 done
 # ifupdown: allow-hotplug events may have fired before this ran -> bring up via networking.service
 for f in $IFUP; do [ -f "$f" ] && sed -i -E 's/^allow-hotplug([[:space:]]+)(e[a-z0-9]+)/auto\1\2/' "$f"; done
 # drop VMware MAC pins (00:50:56 / 00:0c:29 / 00:05:69) that can never match again
 VMOUI='(00:50:56|00:0[cC]:29|00:05:69)'
-IFCFG=$(ls "$R"/etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null | grep -v 'ifcfg-lo$')   # after renames
 for f in $NMKEY; do sed -i -E "/^(mac-address|cloned-mac-address)=$VMOUI/Id" "$f"; done
 for f in $IFCFG; do sed -i -E "/^(HWADDR|MACADDR)=[\"]?$VMOUI/Id" "$f"; done
 for f in $NETPLAN; do
   sed -i -E "/macaddress:[[:space:]]*[\"']?$VMOUI/Id" "$f"
-  # a `match:` left without children would be null -> drop it
-  awk '{l[NR]=$0} END{for(i=1;i<=NR;i++){ if(l[i] ~ /^[[:space:]]*match:[[:space:]]*$/){ match(l[i],/[^ ]/); a=RSTART; match(l[i+1],/[^ ]/); b=RSTART; if(i==NR || b<=a) continue } print l[i] }}' "$f" > "$f.v2v" && cat "$f.v2v" > "$f" && rm -f "$f.v2v"
+  # a `match:` or `routes:` left without children would be null -> drop it
+  awk '{l[NR]=$0} END{for(i=1;i<=NR;i++){ if(l[i] ~ /^[[:space:]]*(match|routes):[[:space:]]*$/){ match(l[i],/[^ ]/); a=RSTART; match(l[i+1],/[^ ]/); b=RSTART; if(i==NR || b<a || (b==a && substr(l[i+1],b,1)!="-")) continue } print l[i] }}' "$f" > "$f.v2v" && cat "$f.v2v" > "$f" && rm -f "$f.v2v"
 done
 mkdir -p "$R/var/lib/v2v-netfix/disabled"
 for f in "$R"/etc/udev/rules.d/*persistent-net*.rules "$R"/etc/systemd/network/*.link; do
   [ -f "$f" ] && grep -qiE "$VMOUI" "$f" && mv "$f" "$R/var/lib/v2v-netfix/disabled/" && echo "disabled $f"
 done
-[ -n "$NETPLAN" ] && [ -z "$R" ] && command -v netplan >/dev/null && netplan generate && echo "netplan regenerated"
-# fallback: nothing configured for any NIC -> DHCP on the first one
+# 4. the map's DHCP NICs without a config get one, in the guest's own network stack
+dhcp_conf() {
+  if [ -n "$NETPLAN" ]; then
+    f="$R/etc/netplan/90-v2v-$1.yaml"
+    printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      dhcp4: true\n' "$1" > "$f"; chmod 600 "$f"
+    NETPLAN="$NETPLAN $f"
+  elif [ -n "$IFCFG" ]; then
+    printf 'DEVICE=%s\nTYPE=Ethernet\nBOOTPROTO=dhcp\nONBOOT=yes\n' "$1" > "$R/etc/sysconfig/network-scripts/ifcfg-$1"
+    IFCFG="$IFCFG $R/etc/sysconfig/network-scripts/ifcfg-$1"
+  elif [ -n "$NMKEY" ] || { [ -d "$R/etc/NetworkManager" ] && [ ! -f "$R/etc/network/interfaces" ]; }; then
+    mkdir -p "$R/etc/NetworkManager/system-connections"
+    f="$R/etc/NetworkManager/system-connections/v2v-$1.nmconnection"
+    printf '[connection]\nid=v2v-%s\ntype=ethernet\ninterface-name=%s\nautoconnect=true\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' "$1" "$1" > "$f"; chmod 600 "$f"
+    NMKEY="$NMKEY $f"
+  elif [ -f "$R/etc/network/interfaces" ]; then
+    mkdir -p "$R/etc/network/interfaces.d"
+    grep -qE '^[[:space:]]*source(-directory)?[[:space:]].*interfaces\.d' "$R/etc/network/interfaces" || \
+      echo 'source /etc/network/interfaces.d/*' >> "$R/etc/network/interfaces"
+    printf 'auto %s\niface %s inet dhcp\n' "$1" "$1" > "$R/etc/network/interfaces.d/v2v-$1"
+    IFUP="$IFUP $R/etc/network/interfaces.d/v2v-$1"
+  elif [ -d "$R/etc/systemd/network" ]; then
+    printf '[Match]\nName=%s\n[Network]\nDHCP=yes\n' "$1" > "$R/etc/systemd/network/90-v2v-$1.network"
+  else
+    echo "no network configuration system found for $1"; return
+  fi
+  echo "DHCP config for $1"
+}
+CONF=$(names)
+for n in $DHCPW; do echo "$CONF" | grep -qx "$n" || dhcp_conf "$n"; done
+# fallback (no map): nothing configured for any NIC -> DHCP on the first one
 CONF=$(names)
 any=""; for n in $NICS; do echo "$CONF" | grep -qx "$n" && any=1; done
-if [ -z "$any" ]; then
+if [ -z "$any" ] && [ ! -f "$MAP" ]; then
   first=$(echo "$NICS" | head -1)
   if [ -f "$R/etc/network/interfaces" ]; then
     mkdir -p "$R/etc/network/interfaces.d"
@@ -891,6 +990,10 @@ if [ -z "$any" ]; then
     printf '[Match]\nName=%s\n[Network]\nDHCP=yes\n' "$first" > "$R/etc/systemd/network/90-v2v-fallback.network"
   fi
   echo "fallback DHCP on $first"
+fi
+if [ -z "$R" ]; then
+  [ -n "$NETPLAN" ] && command -v netplan >/dev/null && netplan generate && echo "netplan regenerated"
+  command -v restorecon >/dev/null && restorecon -R /etc/NetworkManager/system-connections /etc/sysconfig/network-scripts 2>/dev/null
 fi
 exit 0
 '''
@@ -940,53 +1043,115 @@ for ($i = 0; $i -lt 90; $i++) {
 }
 exit 1
 """
-WIN_ONLINE_BAT = r"""@echo off
-rem exo-v2v: register a SYSTEM task that brings the data disks online (it retries
-rem until the storage services answer, runs at every boot until it has succeeded,
-rem then deletes itself), and start it now. Doing the work here directly failed on
+WIN_TASK_BAT = r"""@echo off
+rem exo-v2v: register a SYSTEM task that runs {ps1} (it retries until
+rem the services it needs answer, runs at every boot until it has succeeded, then
+rem deletes itself), and start it now. Doing the work here directly failed on
 rem Windows Server 2025: the firstboot window ends before the storage stack is up.
 rem virt-v2v's firstboot may also run this while Windows is already shutting down
 rem for a driver reboot (schtasks then fails): queue this script again first, so
 rem the next boot retries it, and drop that copy once the task exists.
-set Q="C:\Program Files\Guestfs\Firstboot\scripts\9000-exo-v2v-online-disks.bat"
+set Q="C:\Program Files\Guestfs\Firstboot\scripts\{bat}"
 copy /y "%~f0" %Q% >nul
 for /l %%i in (1,1,12) do (
-  schtasks /create /tn exo-v2v-online-disks /ru SYSTEM /rl HIGHEST /sc ONSTART /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\exo-v2v\online-disks.ps1" && goto created
+  schtasks /create /tn {task} /ru SYSTEM /rl HIGHEST /sc ONSTART /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\exo-v2v\{ps1}" && goto created
   ping -n 11 127.0.0.1 >nul
 )
 exit /b 1
 :created
 del /f %Q% >nul 2>&1
-schtasks /run /tn exo-v2v-online-disks
+schtasks /run /tn {task}
 exit /b 0
+"""
+WIN_ONLINE_BAT = WIN_TASK_BAT.format(ps1="online-disks.ps1", bat="9000-exo-v2v-online-disks.bat",
+                                     task="exo-v2v-online-disks")
+WIN_STATIC_PS1 = r"""# exo-v2v: the static addresses the VM had on VMware, on the Exoscale private
+# network NICs (matched by their Exoscale MAC: the VMware adapters are gone). No
+# gateway: the default route stays on the public NIC (DHCP). Retries until the
+# virtio adapters exist (drivers install at first boot), then removes its task.
+$maps = @(
+{maps}
+)
+$log = "$env:ProgramData\exo-v2v\static-ip.log"
+for ($i = 0; $i -lt 90; $i++) {
+  $left = 0
+  foreach ($m in $maps) {
+    try {
+      $a = Get-NetAdapter -ErrorAction Stop | Where-Object { $_.MacAddress -eq $m.Mac }
+      if (-not $a) { $left++; continue }
+      $cur = @(Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)
+      if ($cur | Where-Object { $_.IPAddress -eq $m.Ip -and $_.PrefixOrigin -eq "Manual" }) { continue }
+      Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Disabled -ErrorAction Stop
+      $cur | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+      Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix 0.0.0.0/0 -ErrorAction SilentlyContinue |
+        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+      New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress $m.Ip -PrefixLength $m.Len -ErrorAction Stop | Out-Null
+      "$(Get-Date -Format o) $($a.Name) $($m.Mac) -> $($m.Ip)/$($m.Len)" | Add-Content $log
+    } catch { $left++; "$(Get-Date -Format o) $($m.Mac): $($_.Exception.Message)" | Add-Content $log }
+  }
+  if ($left -eq 0) {
+    "$(Get-Date -Format o) done" | Add-Content $log
+    schtasks /delete /tn exo-v2v-static-ip /f | Out-Null
+    exit 0
+  }
+  Start-Sleep -Seconds 10
+}
+exit 1
 """
 WIN_FIRSTBOOT = "/Program Files/Guestfs/Firstboot/scripts"
 
 
-def winfix(root_disk, root, env):
-    """Windows: queue a first-boot script in virt-v2v's own firstboot framework
-    (rhsrvany runs scripts/*.bat in order) that registers the online-disks task."""
+def win_static_ps1(netmap):
+    rows = [f'  @{{ Mac = "{e["mac"].upper().replace(":", "-")}"; Ip = "{e["ip"]}"; Len = {int(e["prefix"])} }}'
+            for e in netmap or [] if e.get("mode") == "static"]
+    return WIN_STATIC_PS1.replace("{maps}", ",\n".join(rows)) if rows else None
+
+
+def winfix(root_disk, root, env, netmap=None):
+    """Windows: queue first-boot scripts in virt-v2v's own firstboot framework
+    (rhsrvany runs scripts/*.bat in order) that register the online-disks task
+    and, for private networks, the static-address task."""
     with tempfile.TemporaryDirectory() as td:
-        bat, ps1 = os.path.join(td, "online.bat"), os.path.join(td, "online.ps1")
-        open(bat, "w", newline="\r\n").write(WIN_ONLINE_BAT)
-        open(ps1, "w", newline="\r\n").write(WIN_ONLINE_PS1)
+        files = [("online-disks.ps1", WIN_ONLINE_PS1, "9000-exo-v2v-online-disks.bat", WIN_ONLINE_BAT)]
+        static = win_static_ps1(netmap)
+        if static:
+            files.append(("static-ip.ps1", static, "9010-exo-v2v-static-ip.bat",
+                          WIN_TASK_BAT.format(ps1="static-ip.ps1", bat="9010-exo-v2v-static-ip.bat",
+                                              task="exo-v2v-static-ip")))
         script = (f"run\nmount {root} /\n"
                   f"is-dir \"{WIN_FIRSTBOOT}\"\n")
         rc, out, err = _guestfish(["-a", root_disk], script, env)
         if rc or out.strip() != "true":
             return {"applied": False, "reason": "virt-v2v firstboot framework not found"}
-        rc, out, err = _guestfish(["-a", root_disk],
-                                  f"run\nmount {root} /\nmkdir-p /ProgramData/exo-v2v\n"
-                                  f"upload {ps1} /ProgramData/exo-v2v/online-disks.ps1\n"
-                                  f"upload {bat} \"{WIN_FIRSTBOOT}/9000-exo-v2v-online-disks.bat\"\n", env)
+        lines = ["run", f"mount {root} /", "mkdir-p /ProgramData/exo-v2v"]
+        for i, (ps1, ps1_body, bat, bat_body) in enumerate(files):
+            lp, lb = os.path.join(td, f"{i}.ps1"), os.path.join(td, f"{i}.bat")
+            open(lp, "w", newline="\r\n").write(ps1_body)
+            open(lb, "w", newline="\r\n").write(bat_body)
+            lines += [f"upload {lp} /ProgramData/exo-v2v/{ps1}", f'upload {lb} "{WIN_FIRSTBOOT}/{bat}"']
+        rc, out, err = _guestfish(["-a", root_disk], "\n".join(lines) + "\n", env)
         if rc:
             return {"applied": False, "reason": err.strip()[-300:]}
-    return {"applied": True, "root": root, "distro": "windows", "fix": "online disks (SAN policy OnlineAll)"}
+    fix = "online disks (SAN policy OnlineAll)" + (", static addresses on the private networks" if static else "")
+    return {"applied": True, "root": root, "distro": "windows", "fix": fix}
 
 
-def netfix(root_disk):
+def netfix_map(netmap):
+    """/etc/v2v-netfix.map for the guest (see NETFIX_SH)."""
+    out = []
+    for e in netmap or []:
+        if e.get("mode") == "static":
+            out.append(f"{e['mac']} static {e['ip']}/{e['prefix']}" + (" nogw" if e.get("nogw") else ""))
+        else:
+            out.append(f"{e['mac']} dhcp")
+    return "# exo-v2v: Exoscale NIC MAC -> network config (public NIC first)\n" + "\n".join(out) + "\n" \
+        if out else None
+
+
+def netfix(root_disk, netmap=None):
     """Inject v2v-netfix into a Linux guest (3 appliance launches: inspect,
-    probe, write+label). Non-Linux guests are left alone."""
+    probe, write+label), with the plan's NIC map when there is one. Windows:
+    winfix. Other guests are left alone."""
     env = dict(os.environ, LIBGUESTFS_BACKEND="direct")
     rc, out, err = _guestfish(["--ro", "-a", root_disk], "run\ninspect-os\n", env)
     roots = [r for r in out.split() if r.startswith("/dev/")]
@@ -1001,11 +1166,13 @@ def netfix(root_disk):
         return {"applied": False, "reason": f"probe failed: {err.strip()[-300:]}"}
     kind, distro, selinux = tail3[0], tail3[1], tail3[2] == "true"
     if kind == "windows":
-        return winfix(root_disk, root, env)
+        return winfix(root_disk, root, env, netmap)
     if kind != "linux":
         return {"applied": False, "reason": f"guest type {kind}: not handled"}
     files = [("/usr/local/sbin/v2v-netfix", NETFIX_SH, "0755", "bin_t"),
              ("/etc/systemd/system/v2v-netfix.service", NETFIX_UNIT, "0644", "systemd_unit_file_t")]
+    if netfix_map(netmap):
+        files.append(("/etc/v2v-netfix.map", netfix_map(netmap), "0644", "etc_t"))
     wants = "/etc/systemd/system/multi-user.target.wants/v2v-netfix.service"
     with tempfile.TemporaryDirectory() as td:
         lines = ["mkdir-p /usr/local/sbin", "mkdir-p /etc/systemd/system/multi-user.target.wants"]
@@ -1024,7 +1191,8 @@ def netfix(root_disk):
         rc, out, err = _guestfish(["-a", root_disk, "-i"], "\n".join(lines) + "\n", env)
         if rc:
             return {"applied": False, "reason": err.strip()[-300:]}
-    return {"applied": True, "root": root, "distro": distro, "selinux_labelled": selinux}
+    return {"applied": True, "root": root, "distro": distro, "selinux_labelled": selinux,
+            "map": netfix_map(netmap)}
 
 
 def main():

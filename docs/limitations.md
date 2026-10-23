@@ -1,8 +1,8 @@
 # Limitations
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
-Known limits of exo-v2v 0.2.0. `exo-v2v plan` reports the ones it can detect
+Known limits of exo-v2v 0.3.0. `exo-v2v plan` reports the ones it can detect
 before anything is created.
 
 ## Source VM
@@ -17,8 +17,8 @@ before anything is created.
 | No independent disks or RDMs | Independent disks are left out of snapshots, so changes cannot be tracked. Raw device mappings are not VMDK files. |
 | Root disk of 10 GB or more | Smaller disks are rounded up to 10 GB |
 | Disk sizes rounded up | Each disk becomes the next whole GB; volumes get at least 1 MiB extra |
-| One network interface | The instance gets one public interface. Recreate other networks as Exoscale Private Networks after the cutover. |
-| Static IP addresses | The guest keeps its old static configuration. Switch it to DHCP before the cutover, or update it on the instance. |
+| Network interfaces | A single migration gets one public interface (DHCP). In a [group](groups.md), each port group maps to the public interface or a managed private network, and the guest's configuration follows. |
+| Static IP addresses | In a group, a static address on a private port group is kept on the Exoscale private network. Otherwise the guest keeps its old static configuration: switch it to DHCP before the cutover, or update it on the instance. |
 | Secure Boot and vTPM | Carried over: the instance is created with Secure Boot and a TPM when the source has them (Exoscale sets both at creation). Secrets sealed to the VMware vTPM do not move. Secure Boot is tested; the TPM is not. A guest that only boots because Secure Boot is off at the source cannot gain it later: Exoscale cannot turn it on after creation. |
 | Encrypted disks and encrypted VMs | Not supported (LUKS, BitLocker, vSphere VM encryption) |
 
@@ -56,3 +56,19 @@ exo-v2v adapts data volumes at cutover, with these limits:
 | Windows first boot | Windows finishes installing drivers for a few minutes after RDP opens and may reboot. Data disks come online when it finishes. |
 | Windows licensing | Contact Exoscale before migrating Windows workloads (see [Supported operating systems](supported-os.md#windows-licensing)) |
 | Zones | Tested in ch-gva-2. Conversion needs nested virtualization on the instance type. |
+
+## Groups
+
+| Limit | Details |
+|---|---|
+| One appliance per group | It replicates every member, so it must see all their datastores |
+| Members by name | `group discover --vm`; selecting by vCenter folder or tag is not available yet |
+| One zone | Every member of a group goes to the same zone |
+| Private networks | Managed private networks only (no VPC subnets). The top host address of the subnet (`.254` of a /24) belongs to Exoscale's DHCP server: a VM using it must be renumbered. The appliance role only attaches `v2v-*` private networks |
+| Default route | Moves to the public interface: a private network has no router. Routes to other networks through the old gateway are lost |
+| DNS servers | Static DNS servers in the guests' configurations are kept; change on-premises ones before or during the cutover (`post_cutover` hook) |
+| Elastic IPs | Not handled: the load balancer keeps its instance's public IP, known from `group create` on |
+| Health checks | Run from the appliance against the members' public IPs (the ports are opened to the appliance only) |
+| Rehearsal | No test cutover on copies yet |
+| Rollback after conversion | Converted members must be created again before another attempt (a full copy) |
+

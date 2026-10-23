@@ -1,6 +1,6 @@
 # How exo-v2v works
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied. It is stopped only
@@ -110,11 +110,20 @@ These adjustments are automatic:
 
 | Difference | What exo-v2v does |
 |---|---|
-| Network interfaces get new names and MAC addresses | A first-boot service maps the old interface names in the network configuration to the new ones, removes VMware MAC pinning, and falls back to DHCP |
+| Network interfaces get new names and MAC addresses | A first-boot service maps the old interface names in the network configuration to the new ones, removes VMware MAC pinning, and falls back to DHCP. In a group it follows a map by MAC address: a static address moves to the private network NIC that keeps it, the public interface gets DHCP |
 | Block Storage volumes use 4096-byte sectors; VMware disks use 512 | Partition tables are rewritten for 4096-byte sectors. NTFS volumes are adapted in place. XFS and ext filesystems that only work with 512-byte sectors are rebuilt on a new volume with the same identifiers, as partitions or as LVM logical volumes (a volume group spread over several volumes is rebuilt across new ones, with the same LVM identifiers). The original volumes are kept as rollback copies |
 | Windows keeps new disks offline | A first-boot task sets the SAN policy to `OnlineAll` and brings the data disks online |
 | Secure Boot and TPM | The instance is created with Secure Boot and a TPM when the source VM has them |
 | SELinux guests | Files exo-v2v adds are labelled correctly, so no relabelling reboot is needed |
+
+## Applications
+
+A [group](groups.md) moves several VMs as one application. Each member is an
+ordinary migration; the group adds a manifest (tiers, networks, health checks,
+hooks), private networks that keep the VMs' addresses, and a coordinated
+cutover: the tiers stop front to back, every member converts in parallel, and
+the tiers start back to front, each after the previous one passes its health
+checks. `group rollback` brings the whole application back on VMware.
 
 ## Security model
 
@@ -123,6 +132,8 @@ These adjustments are automatic:
 - Each migration gets its own SSH key and its own security group. That group
   opens TCP 22 only, and only to the appliance's public address. No other
   port is exposed during replication.
+- In a group, each member's own security group also opens its health check
+  ports to the appliance only, until `cleanup`.
 - The data stream runs inside SSH. The agent's disk export and control API
   listen on the instance's loopback interface only.
 - Snapshots are read through a read-only attachment; exo-v2v never writes to

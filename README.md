@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -28,6 +28,9 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | LVM | Volume groups spread over several disks. A disk that extends the system disk's volume group is carried inside the root disk; logical volumes on data disks are rebuilt for 4 KiB sectors when their filesystem needs it, with the same UUIDs |
 | Filesystems | ext, XFS (including 512-byte-sector XFS, the RHEL default on VMware), NTFS, swap; partition tables GPT and MBR |
 | Replication | Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance |
+| **Applications** | A [group](docs/groups.md) of VMs (load balancer, application servers, databases) replicated together and cut over in one window: stopped front to back, converted in parallel, started back to front with health checks, rolled back as a whole |
+| Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs |
+| Status page | A read-only [web page](docs/web.md) on the appliance with every migration and group |
 | Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](docs/limitations.md)) |
 
 ## Documentation
@@ -42,6 +45,8 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 | [Receiver templates](docs/receiver-templates.md) | Templates that boot straight into the receiver: faster `create`, no mirror access |
 | [Supported operating systems](docs/supported-os.md) | Tested and expected-to-work guests |
 | [Limitations](docs/limitations.md) | Known limits and their workarounds |
+| [Moving an application](docs/groups.md) | Groups: the manifest, private networks, the coordinated cutover, rollback |
+| [Web status page](docs/web.md) | The read-only status page and its API |
 | [Operations runbook](docs/OPERATIONS.md) | Step-by-step migration, rollback, troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Design details for contributors |
 
@@ -51,14 +56,14 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 |---|---|
 | vSphere | vCenter or standalone ESXi 6.7+ (tested: ESXi 7.0 U3). An account allowed to snapshot the source VM and reconfigure the appliance VM (add/remove disk). |
 | Replication appliance | A Linux VM **in the same vSphere environment**, on a host that sees the source VM's datastores (hot-add transport, the same mechanism backup products use). Python ≥ 3.10, `ssh`, the [`exo` CLI](https://github.com/exoscale/cli) ≥ 1.102, a free paravirtual SCSI slot. Runs `sync`/`cutover` as **root**. Outbound TCP 22 to Exoscale, 443 to vCenter/ESXi. |
-| Exoscale | An API key restricted to Compute (instances, Block Storage, security groups) in the `exo` CLI config (or `EXOSCALE_API_KEY`/`EXOSCALE_API_SECRET`); see [IAM role](docs/iam.md). |
+| Exoscale | An API key restricted to Compute (instances, Block Storage, security groups, private networks, anti-affinity groups) in the `exo` CLI config (or `EXOSCALE_API_KEY`/`EXOSCALE_API_SECRET`); see [IAM role](docs/iam.md). |
 | Source VM | Linux or Windows Server ([supported operating systems](docs/supported-os.md)); BIOS or UEFI, with or without Secure Boot; disks on SCSI, SATA or NVMe controllers, up to 5 data disks as Block Storage volumes; snapshot chains are fine; no independent/RDM disks. CBT is enabled automatically. VMware Tools running at `plan` time helps it map the disks. |
 
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.2.0/exo_v2v-0.2.0-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.2.0   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.3.0/exo_v2v-0.3.0-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.3.0   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -78,6 +83,19 @@ exo-v2v cleanup web01                   # after you validated the workload
 `plan` prints everything it will do and refuses unsupported VMs; nothing is
 created before `create`. Every step is idempotent and resumable; state lives in
 `~/.exo-v2v/<name>/` (`EXO_V2V_HOME` to move it).
+
+### Move an application
+
+```bash
+exo-v2v group discover shop --vm lb01 --vm app01 --vm app02 --vm db01 --zone ch-gva-2   # draft shop.yaml
+exo-v2v group plan    shop -f shop.yaml   # tiers, networks, health checks, hooks: every member planned
+exo-v2v group create  shop                # private networks (addresses kept), anti-affinity, receivers
+sudo -E exo-v2v group sync shop --every 900
+sudo -E exo-v2v group cutover shop        # stop front to back, convert in parallel, start back to front
+sudo -E exo-v2v web                       # read-only status page on 127.0.0.1:8780
+```
+
+See [Moving an application](docs/groups.md) and [Web status page](docs/web.md).
 
 ## What cutover does
 
@@ -118,6 +136,7 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 | Debian 13 under continuous write load (3 delta cycles) | pass | 298 s |
 | AlmaLinux 9, 4 disks on paravirtual SCSI + NVMe, XFS-512 logical volume spanning two disks (rebuilt across two new volumes), with and without a receiver template | 2/2 | 9–10 min¹ |
 | AlmaLinux 9 with its root volume group extended onto a second disk (carried inside the root disk), on a 3-level snapshot chain; during replication: snapshot deleted, snapshot reverted, data disk grown, system disk grown, disk hot-added | pass | 9 min¹ |
+| A group: HAProxy (Debian 13, 2 NICs), 2 application servers (AlmaLinux 9, Ubuntu 24.04), PostgreSQL (AlmaLinux 9, XFS-512 data disk), plus a Windows Server 2022 member; static private addresses kept on a private network | 3 coordinated cutovers: pass; a conversion failure stopped the group and `group rollback` restored it on VMware; the group process killed mid-cutover, then resumed | window 461–486 s |
 
 ¹ Without `--verify`; these runs used it (every disk hash-compared before conversion, about 13–15 more minutes on the lab's HDD datastore).
 
@@ -127,7 +146,8 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 
 - 1 root disk + up to 5 data volumes per instance; root disk ≥ 10 GB. Disks
   carried inside the root disk (`--fold`) do not count.
-- One public NIC; extra VMware NICs → attach Exoscale Private Networks afterwards.
+- A single migration gets one public NIC. In a [group](docs/groups.md), each port group maps to
+  the public interface or an Exoscale managed private network (addresses kept); no Elastic IPs, no VPC yet.
 - Windows data volumes must use NTFS clusters ≥ 4 KiB (the default); smaller
   clusters cannot be expressed in 4096-byte sectors. Windows **dynamic disks**
   and Storage Spaces disks are not supported as data disks (detected, left

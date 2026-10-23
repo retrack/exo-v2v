@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -37,11 +37,30 @@ before the cutover so that the final delta is small.
 
 `exo-v2v status [-v] [NAME]` shows the phase, the last cycle and its age.
 
+### An application (group)
+
+| Step | Command | Source VMs |
+|---|---|---|
+| Draft | `exo-v2v group discover NAME --vm A --vm B ... --zone Z` then edit `NAME.yaml` | untouched |
+| Plan | `exo-v2v group plan NAME -f NAME.yaml` | untouched |
+| Networks + receivers | `exo-v2v group create NAME` | untouched |
+| Copy and keep fresh | `sudo -E exo-v2v group sync NAME [--every 900]` | running |
+| Window | `sudo -E exo-v2v group cutover NAME` | **shut down**, front to back |
+| Follow | `exo-v2v group status NAME`, the [web page](web.md), `~/.exo-v2v/groups/NAME/logs/VM.log` | |
+| Finish | `exo-v2v group cleanup NAME` | off |
+
+Before the window: lower the TTL of the DNS names that will move (the load
+balancer's new address is its receiver's IP, shown by `group status`), and
+check that `group sync` ran recently (`cutover.max_sync_age`).
+
 ## 3. Rollback
 
 Before cleanup the source VM is intact (only its CBT setting was enabled):
 `exo-v2v rollback NAME` powers it back on and stops the Exoscale instance.
 After a cutover, data written on Exoscale is **not** copied back.
+
+For a group, `exo-v2v group rollback NAME` stops the Exoscale instances (front first) and powers
+the sources on, back end first. Members that were not converted yet keep syncing.
 
 ## 4. Troubleshooting
 
@@ -61,11 +80,17 @@ After a cutover, data written on Exoscale is **not** copied back.
 | `sync`: `disk(s) … removed from VM` | The copy no longer matches the VM. `cleanup --delete-instance`, then plan and create again. |
 | Windows: a dynamic or Storage Spaces volume is missing after cutover | Not supported on data disks (preflight reports it). Roll back, convert the disks to basic (copy spanned/striped volumes to basic ones), migrate again. |
 | Windows: D: (data) missing after cutover | First boot runs several driver-install reboots (5–10 min) before the `exo-v2v-online-disks` scheduled task onlines the disks; check `C:\ProgramData\exo-v2v\online-disks.log` and `C:\Program Files\Guestfs\Firstboot\log.txt`. Manually: `Set-Disk -Number 1 -IsOffline $false`. |
+| `cutover` interrupted (appliance reboot, lost session) | Run `cutover NAME` again: it records its steps and resumes (it does not convert twice). A group: `group cutover NAME` again; member cutovers still running are waited for |
+| `group cutover`: `preflight: ... last cycle ... ago` | Run `group sync` first, or raise `cutover.max_sync_age` |
+| `group cutover` stopped on a member | `group status NAME` and the member's log in `~/.exo-v2v/groups/NAME/logs/`. Fix, then `group cutover NAME` again (it resumes), or `group rollback NAME` |
+| `group cutover`: health check failed | The member runs on Exoscale but its check did not pass within `health_timeout`: check the service and its security groups (the check reaches the public IP from the appliance). Run `group cutover` again once fixed, or roll back |
+| A member has no private address after cutover | `/var/log/v2v-netfix.log` in the guest; `exo compute private-network show v2v-GROUP-NET` lists the leases. The NIC map is in `/etc/v2v-netfix.map` |
 | Windows volume shows RAW | It was formatted with < 4 KiB clusters (cannot be expressed in 4 KiB sectors); move the data or reformat with 4 KiB clusters before migrating. |
 
 ## 5. Clean-up of Exoscale resources
 
 Everything exo-v2v creates carries the label `exo-v2v=<NAME>`: the instance,
 its volumes, `<volume>-4k` relayout volumes and the security group
-`exo-v2v-<NAME>`. Rollback copies of relaid volumes additionally carry
+`exo-v2v-<NAME>`. A group also creates `v2v-GROUP-*` private networks, anti-affinity groups
+and the security groups its manifest defines; `group cleanup --delete-instances` removes them. Rollback copies of relaid volumes additionally carry
 `exo-v2v-rollback=<export>`.

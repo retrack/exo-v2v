@@ -489,6 +489,61 @@ def disks():
          "sectors, Block Storage volumes have 4 KiB sectors.", y0=56)
 
 
+# ---------------------------------------------------------------- 8. group cutover (timeline)
+def group_cutover():
+    b = []
+    X0, SC = 184, 100                       # t (relative units) -> x
+    X = lambda t: X0 + t * SC
+    rows = [("TIER 3", "lb01", 136), ("TIER 2", "app01 · app02", 224), ("TIER 1", "db01", 312)]
+    H = 40
+    # (row, t0, t1, kind, text): off at 1 / 1.6 / 2.2, converted in parallel, started 5.0 / 5.7 / 6.4
+    bars = [(0, 0.2, 1.0, "input", "ON VMWARE"), (0, 1.0, 1.6, "focal", "FINAL COPY"), (0, 1.6, 4.0, "backend", "CONVERT"),
+            (0, 6.4, 7.2, "uefi", "ON EXOSCALE"),
+            (1, 0.2, 1.6, "input", "ON VMWARE"), (1, 1.6, 2.2, "focal", "FINAL"), (1, 2.2, 4.6, "backend", "CONVERT"),
+            (1, 5.7, 7.2, "uefi", "ON EXOSCALE"),
+            (2, 0.2, 2.2, "input", "ON VMWARE"), (2, 2.2, 2.8, "focal", "FINAL"), (2, 2.8, 4.9, "backend", "CONVERT"),
+            (2, 5.0, 7.2, "uefi", "ON EXOSCALE")]
+    # window brace (below the rows)
+    yb = 384
+    b.append(f'<line x1="{X(1.0)}" y1="{yb}" x2="{X(7.0)}" y2="{yb}" stroke="{ACCENT}" stroke-width="1.2"/>')
+    for t in (1.0, 7.0):
+        b.append(f'<line x1="{X(t)}" y1="{yb - 6}" x2="{X(t)}" y2="{yb + 6}" stroke="{ACCENT}" stroke-width="1.2"/>')
+    b.append(label(X(4.0), yb, "MAINTENANCE WINDOW ≈ THE SLOWEST MEMBER", ACCENT, side="below"))
+    # stop order (front to back) and start order (back to front)
+    b.append(path(f"M {X(1.0) + 12},{136 + H} V {224 - 2}", "accent", dashed=True))
+    b.append(path(f"M {X(1.6) + 12},{224 + H} V {312 - 2}", "accent", dashed=True))
+    b.append(path(f"M {X(5.6)},{312} V {224 + H + 2}", "link", dashed=True))
+    b.append(path(f"M {X(6.3)},{224} V {136 + H + 2}", "link", dashed=True))
+    b.append(label(None, 200, "STOP", ACCENT, side="left", x_line=X(1.0) + 12))
+    b.append(label(None, 288, "STOP", ACCENT, side="left", x_line=X(1.6) + 12))
+    b.append(label(None, 288, "HEALTHY", LINK, side="right", x_line=X(5.6)))
+    b.append(label(None, 200, "HEALTHY", LINK, side="right", x_line=X(6.3)))
+    for tag, name, y in rows:
+        fill, stroke, tstroke, ttext = TREAT["backend"]
+        b.append(f'<text x="{X0 - 112}" y="{y + 16}" fill="{MUTED}" font-size="7" font-family="{MONO}" letter-spacing="0.14em">{tag}</text>')
+        b.append(f'<text x="{X0 - 112}" y="{y + 31}" fill="{INK}" font-size="12" font-weight="600" font-family="{SANS}">{esc(name)}</text>')
+    for r, t0, t1, kind, text in bars:
+        fill, stroke, _, _ = TREAT[kind]
+        y = rows[r][2]
+        b.append(f'<rect x="{X(t0)}" y="{y}" width="{(t1 - t0) * SC}" height="{H}" rx="4" fill="{PAPER}"/>')
+        b.append(f'<rect x="{X(t0)}" y="{y}" width="{(t1 - t0) * SC}" height="{H}" rx="4" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
+        b.append(f'<text x="{X((t0 + t1) / 2)}" y="{y + 23}" fill="{INK if kind != "input" else MUTED}" font-size="8" '
+                 f'font-family="{MONO}" text-anchor="middle" letter-spacing="0.06em">{text}</text>')
+    # hooks
+    for t, text in ((0.6, "PRE_CUTOVER HOOK"), (7.0, "POST_CUTOVER HOOK")):
+        b.append(f'<line x1="{X(t)}" y1="{96}" x2="{X(t)}" y2="{124}" stroke="{SOFT}" stroke-width="1" stroke-dasharray="2,2"/>')
+        b.append(label(X(t), 104, text, SOFT, side="above"))
+    b.append(legend(448, 72, 840, [("input", "Source VM running"), ("focal", "Final copy (VM off)"),
+                                   ("backend", "Conversion"), ("uefi", "Running on Exoscale")]))
+    page("group-cutover", "Timeline · exo-v2v group", "A group cutover",
+         "The tiers of an application stop front to back: the load balancer, then the application servers, then the "
+         "database. Each VM's final copy and conversion start as soon as it is off, and the conversions overlap. The "
+         "tiers then start back to front, each one only after the health checks of the previous one pass.",
+         960, 540, "\n".join(b),
+         "Tier 1 is the back end: stopped last, started first. The window lasts about as long as the slowest "
+         "member's own cutover, not the sum of them.", y0=60)
+
+
 architecture()
 lifecycle()
 replication()
@@ -496,4 +551,5 @@ cutover()
 create_template()
 downtime()
 disks()
+group_cutover()
 print("written:", ", ".join(p.name for p in sorted(OUT.glob("*.html"))))

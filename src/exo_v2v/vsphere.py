@@ -183,13 +183,61 @@ def inventory(vc, vm):
         "cbt_disks": disk_ctk(vm),
         "snapshots": [s.name for s in _walk_snaps(vm.snapshot.rootSnapshotList)] if vm.snapshot else [],
         "tools": str(vm.guest.toolsRunningStatus),
-        "nics": [{"label": d.deviceInfo.label, "type": type(d).__name__.replace("vim.vm.device.", ""),
-                  "mac": d.macAddress} for d in cfg.hardware.device if isinstance(d, vim.vm.device.VirtualEthernetCard)],
+        "nics": nics_of(vm),
         "disks": [{"id": k, "label": d.deviceInfo.label, "capacity": d.capacityInBytes,
                    "file": d.backing.fileName, "thin": bool(getattr(d.backing, "thinProvisioned", False)),
                    "change_id": getattr(d.backing, "changeId", None),
                    "mode": getattr(d.backing, "diskMode", "")} for k, d in sorted(disks.items())],
     }
+
+
+def nics_of(vm):
+    """The VM's NICs in device order: port group, and (VMware Tools) the guest's
+    IPv4 addresses with their origin (dhcp/manual) and the default gateway."""
+    cfg, guest = vm.config, vm.guest
+    pg_by_key = {getattr(n, "key", None): n.name for n in vm.network or []}
+    gnet = list(getattr(guest, "net", None) or [])
+    gw = {}
+    for st in getattr(guest, "ipStack", None) or []:
+        for r in getattr(getattr(st, "ipRouteConfig", None), "ipRoute", None) or []:
+            if r.network == "0.0.0.0" and r.prefixLength == 0 and r.gateway and r.gateway.ipAddress:
+                try:
+                    gw[gnet[int(r.gateway.device)].macAddress.lower()] = r.gateway.ipAddress
+                except (ValueError, IndexError, AttributeError):
+                    pass
+    dns = [a for st in getattr(guest, "ipStack", None) or []
+           for a in getattr(getattr(st, "dnsConfig", None), "ipAddress", None) or []]
+    out = []
+    for d in cfg.hardware.device:
+        if not isinstance(d, vim.vm.device.VirtualEthernetCard):
+            continue
+        b = d.backing
+        pg = getattr(b, "deviceName", None)
+        if pg is None and getattr(b, "port", None) is not None:          # distributed port group
+            pg = pg_by_key.get(b.port.portgroupKey, b.port.portgroupKey)
+        mac = (d.macAddress or "").lower()
+        g = next((n for n in gnet if (n.macAddress or "").lower() == mac), None)
+        ips = []
+        for a in (getattr(getattr(g, "ipConfig", None), "ipAddress", None) or []) if g else []:
+            if ":" not in a.ipAddress and not a.ipAddress.startswith("169.254."):
+                ips.append({"ip": a.ipAddress, "prefix": a.prefixLength, "origin": str(a.origin or "")})
+        out.append({"label": d.deviceInfo.label, "type": type(d).__name__.replace("vim.vm.device.", ""),
+                    "key": d.key, "mac": mac, "port_group": pg,
+                    "connected": bool(getattr(d.connectable, "startConnected", True)),
+                    "ips": ips, "gateway": gw.get(mac), "dns": dns})
+    return out
+
+
+def power_on(vm, tools_timeout=600):
+    """Power the VM on and wait for VMware Tools (the guest is up), or the timeout."""
+    if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOn:
+        task(vm.PowerOnVM_Task)
+    t0 = time.time()
+    while time.time() - t0 < tools_timeout:
+        if str(vm.guest.toolsRunningStatus) == "guestToolsRunning":
+            return round(time.time() - t0)
+        time.sleep(5)
+    return None
 
 
 def _walk_snaps(lst):

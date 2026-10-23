@@ -407,3 +407,145 @@ def test_windows_dynamic_disk_left_untouched(tmp_path, monkeypatch):
     assert r["foreign"] == "Windows dynamic disk (LDM)" and r["action"] == "none" and not r["compatible"]
     assert any("dynamic disk" in p for p in r["problems"])
     assert open(img, "rb").read() == before
+
+
+# ---------------- groups (0.3) ----------------
+
+from exo_v2v import group as G  # noqa: E402
+
+
+def nic(mac, pg, ips=(), origin="manual", label="Network adapter 1"):
+    return {"label": label, "mac": mac, "port_group": pg, "connected": True,
+            "ips": [{"ip": i, "prefix": 24, "origin": origin} for i in ips]}
+
+
+NETS = {"front": {"source": "pg-lab", "type": "public"},
+        "app": {"source": "pg-app", "type": "private", "cidr": "10.20.0.0/24", "keep_addresses": True,
+                "exoscale_name": "v2v-shop-app"}}
+
+
+def test_network_map_private_static_gets_public_nic_first():
+    nets, errs = plan.network_map([nic("00:50:56:00:00:31", "pg-app", ["10.20.0.31"])], NETS)
+    assert not errs
+    assert [n["network"] for n in nets] == ["public", "v2v-shop-app"]
+    assert nets[0]["source_mac"] is None and nets[0]["mode"] == "dhcp"
+    assert nets[1] == {"network": "v2v-shop-app", "name": "app", "source_mac": "00:50:56:00:00:31", "mode": "static",
+                       "port_group": "pg-app", "ip": "10.20.0.31", "prefix": 24, "origin": "manual", "nogw": True}
+
+
+def test_network_map_load_balancer_two_nics():
+    nets, errs = plan.network_map([nic("00:50:56:00:00:01", "pg-lab", ["10.77.0.50"], "dhcp"),
+                                   nic("00:50:56:00:00:10", "pg-app", ["10.20.0.10"], label="Network adapter 2")], NETS)
+    assert not errs
+    assert nets[0]["source_mac"] == "00:50:56:00:00:01" and nets[1]["ip"] == "10.20.0.10"
+
+
+def test_network_map_errors():
+    _n, errs = plan.network_map([nic("00:50:56:00:00:09", "pg-other")], NETS)
+    assert "not mapped" in errs[0]
+    _n, errs = plan.network_map([nic("00:50:56:00:00:09", "pg-app")], NETS)        # Tools gave no address
+    assert "address on app unknown" in errs[0]
+    _n, errs = plan.network_map([nic("00:50:56:00:00:09", "pg-app", ["10.20.0.254"])], NETS)
+    assert "keeps for its DHCP server" in errs[0]
+    nets, errs = plan.network_map([nic("00:50:56:00:00:09", "pg-app")], NETS, {"app": "10.20.0.40"})
+    assert not errs and nets[1]["ip"] == "10.20.0.40" and nets[1]["mode"] == "static"
+    nets, errs = plan.network_map([nic("00:50:56:00:00:09", "pg-app", ["10.20.0.41"], "dhcp")], NETS)
+    assert nets[1]["mode"] == "dhcp" and nets[1]["ip"] == "10.20.0.41"       # DHCP guest: the lease keeps it
+
+
+def test_privnet_range():
+    assert plan.privnet_range("10.20.0.0/24") == ("10.20.0.1", "10.20.0.253", "255.255.255.0")
+
+
+def manifest(**kw):
+    m = {"name": "shop", "zone": "ch-gva-2", "networks": {k: dict(v) for k, v in NETS.items()},
+         "anti_affinity": {"app": ["app01", "app02"]},
+         "vms": [{"vm": "db01", "tier": 1, "health": {"tcp": 5432}},
+                 {"vm": "app01", "tier": 2}, {"vm": "app02", "tier": 2},
+                 {"vm": "lb01", "tier": 3, "health": {"http": "http://{public_ip}/", "expect": "ok"}}],
+         "cutover": {"max_window": "30m"}}
+    m.update(kw)
+    return m
+
+
+def test_manifest_validation_and_defaults():
+    m = G.validate(manifest(defaults={"receiver_template": "exo-v2v-linux-legacy"}))
+    assert m["cutover"]["max_window"] == 1800 and m["cutover"]["health_timeout"] == 600
+    assert m["vms"][1]["receiver_template"] == "exo-v2v-linux-legacy"
+    assert m["networks"]["app"]["exoscale_name"] == "v2v-shop-app"
+    for bad in (manifest(name="Shop!"), manifest(vms=[{"vm": "a", "tier": 0}]),
+                manifest(vms=[{"vm": "a", "colour": "red"}]), manifest(anti_affinity={"x": ["nope"]}),
+                manifest(networks={"n": {"source": "pg", "type": "private"}})):
+        with pytest.raises(SystemExit):
+            G.validate(bad)
+
+
+def test_placeholders_hooks_and_health_ports():
+    ctx = {"lb01": {"public_ip": "1.2.3.4", "private_ip": "10.20.0.10", "ip.app": "10.20.0.10"},
+           "db01": {"public_ip": "5.6.7.8", "private_ip": "10.20.0.31"}}
+    assert G.expand("dns {lb01.public_ip} db {db01.ip.app}{x}", ctx) == "dns 1.2.3.4 db {db01.ip.app}{x}"
+    assert G.expand("http://{public_ip}:8080/", ctx, "db01") == "http://5.6.7.8:8080/"
+    assert G.health_ports({"tcp": 5432}) == [5432]
+    assert G.health_ports({"http": "https://{public_ip}/x"}) == [443]
+    assert G.health_ports({"http": "http://{public_ip}:8080/h"}) == [8080]
+    assert G.health_ports({"http": "http://{private_ip}/"}) == []
+    assert G.duration("2h") == 7200 and G.parse_rule("tcp/80 0.0.0.0/0") == ("tcp", "80", "0.0.0.0/0")
+
+
+def test_netfix_map_and_windows_static_script():
+    m = [{"mac": "06:a1:02:00:07:cd", "mode": "dhcp"},
+         {"mac": "0a:e2:d0:88:6e:d6", "mode": "static", "ip": "10.20.0.21", "prefix": 24, "nogw": True}]
+    assert guestfix.netfix_map(m).splitlines()[1:] == ["06:a1:02:00:07:cd dhcp",
+                                                       "0a:e2:d0:88:6e:d6 static 10.20.0.21/24 nogw"]
+    ps1 = guestfix.win_static_ps1(m)
+    assert 'Mac = "0A-E2-D0-88-6E-D6"; Ip = "10.20.0.21"; Len = 24' in ps1
+    assert guestfix.win_static_ps1(m[:1]) is None and guestfix.netfix_map([]) is None
+    assert "exo-v2v-static-ip" in guestfix.WIN_TASK_BAT.format(ps1="s.ps1", bat="b.bat", task="exo-v2v-static-ip")
+
+
+def test_web_is_read_only_and_serves_state(tmp_path, monkeypatch):
+    import json as J
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from exo_v2v import state, web
+    monkeypatch.setenv("EXO_V2V_HOME", str(tmp_path))
+    st = state.State.new("shop-db01", {"vm": "db01", "zone": "ch-gva-2", "disks": [{"capacity": GiB}],
+                                       "networks": [{"network": "v2v-shop-app", "ip": "10.20.0.31"}]})
+    st.data["group"] = "shop"
+    st.data["cycles"].append({"t": 1, "seconds": 3, "disks": {"scsi0:0": {"covered": 5, "mode": "full"}}})
+    st.save()
+    gd = tmp_path / "groups" / "shop" / "logs"
+    gd.mkdir(parents=True)
+    (gd / "db01.log").write_text("line1\nline2\n")
+    (gd.parent / "group.json").write_text(J.dumps({"name": "shop", "manifest": {"zone": "ch-gva-2"},
+                                                   "members": [{"vm": "db01", "migration": "shop-db01", "tier": 1}]}))
+    before = sorted(p.stat().st_mtime for p in tmp_path.rglob("*") if p.is_file())
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    get = lambda p: J.load(urllib.request.urlopen(base + p))
+    try:
+        o = get("/api/overview")
+        assert o["migrations"][0]["private_ips"] == ["10.20.0.31"] and o["groups"][0]["members"][0]["vm"] == "db01"
+        assert get("/api/migrations/shop-db01")["cycles"][0]["seconds"] == 3
+        assert get("/api/groups/shop/log/db01")["lines"] == ["line1", "line2"]
+        assert b"exo-v2v" in urllib.request.urlopen(base + "/").read()
+        for path in ("/api/groups/shop/log/..%2F..%2Fshop-db01%2Fstate", "/api/migrations/..", "/api/groups/nope"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + path)
+            assert e.value.code == 404
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(urllib.request.Request(base + "/api/overview", data=b"{}", method="POST"))
+        assert e.value.code == 405
+        web.Handler.token = "s3cret"
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(base + "/api/overview")
+        assert e.value.code == 401
+        req = urllib.request.Request(base + "/api/overview", headers={"Authorization": "Bearer s3cret"})
+        assert J.load(urllib.request.urlopen(req))["migrations"]
+    finally:
+        web.Handler.token = None
+        srv.shutdown()
+    assert sorted(p.stat().st_mtime for p in tmp_path.rglob("*") if p.is_file()) == before

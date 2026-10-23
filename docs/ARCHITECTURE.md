@@ -1,12 +1,14 @@
 # exo-v2v architecture
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## Components
 
 | Component | Runs on | Code |
 |---|---|---|
 | CLI / orchestrator | replication appliance (Linux VM in vSphere) | `exo_v2v/cli.py`, `plan.py`, `state.py`, `exo.py`, `tunnel.py` |
+| Group orchestrator | appliance; members run as child processes | `exo_v2v/group.py` |
+| Web status page (read-only) | appliance | `exo_v2v/web.py`, `web.html` |
 | vSphere replication (sender) | appliance, as root | `exo_v2v/vsphere.py` |
 | Receiver agent | the target Exoscale instance, booted **from RAM** | `exo_v2v/receiver/agent.py`, `nbdserve.py`, `guestfix.py` |
 | Receiver bootstrap (stock template) | target instance, first boot | `receiver/bootstrap-kexec.sh`; `userdata.py` (key-only user-data, payload tarball) |
@@ -198,3 +200,52 @@ ifupdown, netplan, NetworkManager keyfiles and ifcfg; turns `allow-hotplug`
 into `auto` (the hotplug event may have fired before the fix); removes VMware
 OUI MAC pins and persistent-net rules; runs `netplan generate`; falls back to
 DHCP on the first NIC. Log: `/var/log/v2v-netfix.log`.
+
+With a plan that maps NICs (groups), `POST /convert {"netmap": [...]}` carries
+the instance's NICs by MAC (`exo x get-instance`: the CLI's `instance show`
+has no MACs), public first. The receiver writes `/etc/v2v-netfix.map`
+(`MAC static ADDR/LEN nogw` or `MAC dhcp`) and the service applies it first:
+the configuration holding each static address is renamed to the NIC with that
+MAC (in two phases through temporary names, so `eth0` → `eth1` swaps work), its
+gateway is removed (`gateway`, `gateway4`, default routes, `GATEWAY=` with
+`DEFROUTE=no`, NetworkManager `never-default=true`), and a DHCP configuration
+is written in the guest's own stack for a mapped NIC left without one. A
+profile bound only by MAC gets an `interface-name`. Windows: a first-boot
+scheduled task (same pattern as the disk task) sets the addresses with
+`New-NetIPAddress` on the adapters with those MACs.
+
+## Groups
+
+`group plan` builds each member's plan (`plan.build` with the NIC map from
+`plan.network_map`) and stores `groups/NAME/group.json` next to the member
+states (`GROUP-VM`, `state.data["group"]`). `group create` makes the private
+networks (managed, range = the subnet minus the top address), anti-affinity
+groups (create-time only on Exoscale, so they go into `instance create`) and
+security groups, then runs `create` per member; `create` attaches the private
+networks with `--ip` (static leases) and records the NIC MACs.
+
+Members' `sync` and `cutover` run as child processes (`python -m exo_v2v ...
+--in-group`) in their own sessions, each writing its log file: a member keeps
+going if the group process dies, and a group command run again finds it by the
+pid in the member's lock file. The per-VM cutover is split into recorded steps
+(`cutover_steps`: `down_at`, `source_off`, `final_cycle`, `convert_started`,
+`converted`, `flushed`, `stopped`, `scaled`, `started`) so that it resumes
+anywhere; `cutover --no-start` stops after the flush. The group cutover is a
+state machine in `group.json` (`preflight`, `warm`, `pre_hook`, `stop_started`,
+`tierN_off`, `converted`, `tierN_up`, `post_hook`): it starts the member
+cutovers tier by tier from the front, waits for each tier's `source_off`
+before shutting down the next, waits for every conversion, stops and scales
+all instances, then starts tier by tier from the back with health checks.
+`group rollback` stops the converted instances front first and calls the
+per-VM rollback back end first; a member whose conversion had not started
+keeps its receiver and returns to `syncing`.
+
+## Web status page
+
+`exo-v2v web` is a `ThreadingHTTPServer` serving `web.html` (inline CSS and
+JavaScript, no external requests) and a JSON API over the state files. It
+answers `GET`/`HEAD` only, never opens a state file for writing and never takes
+a lock: running commands are found from the pid each lock file records (checked
+against `/proc/PID/cmdline`). Member logs are served by member name only, never
+by a path from the URL. Off loopback it requires a token (bearer header or an
+HTTP-only cookie set by `/login`).

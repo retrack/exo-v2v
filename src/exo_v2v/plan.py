@@ -1,4 +1,6 @@
 """Migration plan: compatibility checks + Exoscale sizing from a vSphere inventory."""
+import ipaddress
+
 from .exo import BIOS_TEMPLATE, UEFI_TEMPLATE
 from .util import gib_ceil
 
@@ -54,6 +56,62 @@ def fold_layout(root_cap, folds):
     return out, max(MIN_DISK_GB, gib_ceil(pos + MiB))
 
 
+def privnet_range(cidr):
+    """(start, end, netmask) of an Exoscale managed private network for `cidr`:
+    every host address except the top one, which the platform keeps (a /24
+    may end at .253, not .254)."""
+    n = ipaddress.ip_network(cidr, strict=False)
+    return str(n.network_address + 1), str(n.broadcast_address - 2), str(n.netmask)
+
+
+def network_map(nics, networks, ips=None):
+    """Target NICs of a VM, in the order the instance gets them: the public
+    interface (DHCP) first, then one private network per source NIC.
+    `networks`: {name: {"source": port group, "type": "public"|"private",
+    "cidr", "keep_addresses", "exoscale_name"}}; `ips`: {network name: address}
+    overrides. Returns (entries, errors)."""
+    ips = ips or {}
+    by_pg = {n["source"]: (name, n) for name, n in networks.items()}
+    out, errors, public = [], [], None
+    for nic in nics:
+        hit = by_pg.get(nic.get("port_group"))
+        where = f"{nic['label']} ({nic['mac']}, port group {nic.get('port_group')!r})"
+        if not hit:
+            errors.append(f"{where}: port group not mapped in the manifest's networks")
+            continue
+        name, n = hit
+        if n["type"] == "public":
+            if public:
+                errors.append(f"{where}: a second NIC on the public interface ({public['name']})")
+                continue
+            public = {"network": "public", "name": name, "source_mac": nic["mac"], "mode": "dhcp"}
+            continue
+        e = {"network": n["exoscale_name"], "name": name, "source_mac": nic["mac"], "mode": "dhcp",
+             "port_group": nic.get("port_group")}
+        net = ipaddress.ip_network(n["cidr"], strict=False)
+        if n.get("keep_addresses", True):
+            want, origin = ips.get(name), "manifest"
+            if not want:
+                cand = [a for a in nic.get("ips", []) if ipaddress.ip_address(a["ip"]) in net]
+                if cand:
+                    want, origin = cand[0]["ip"], cand[0].get("origin") or "guest"
+            if not want:
+                errors.append(f"{where}: address on {name} unknown (VMware Tools not running?): "
+                              f"set `ip: {{{name}: A.B.C.D}}` for this VM")
+            else:
+                a = ipaddress.ip_address(want)
+                if a not in net or a in (net.network_address, net.broadcast_address):
+                    errors.append(f"{where}: {want} is not a host address of {name} ({net})")
+                elif a == net.broadcast_address - 1:
+                    errors.append(f"{where}: {want} is the address Exoscale keeps for its DHCP server on "
+                                  f"{net}: renumber this VM, or give {name} a larger cidr")
+                # a guest on DHCP gets the same address from the static lease
+                e.update(ip=want, prefix=net.prefixlen, origin=origin,
+                         mode="dhcp" if origin == "dhcp" else "static", nogw=True)
+        out.append(e)
+    return [public or {"network": "public", "name": None, "source_mac": None, "mode": "dhcp"}] + out, errors
+
+
 def instance_type_for(vcpus, mem_mb):
     gib = mem_mb / 1024
     for name, c, m in STANDARD_TYPES:
@@ -76,7 +134,8 @@ def os_family(guest_id):
 
 
 def build(inv, zone, target_type=None, system_disk=None, security_groups=(), receiver_template=None,
-          receiver_template_visibility="public", receiver_template_boot_mode=None, fold=(), auto_fold=True):
+          receiver_template_visibility="public", receiver_template_boot_mode=None, fold=(), auto_fold=True,
+          networks=None, anti_affinity_groups=()):
     errors, warnings, notes = [], [], []
     disks = sorted(inv["disks"], key=lambda d: disk_key(d["id"]))
     if not disks:
@@ -134,9 +193,10 @@ def build(inv, zone, target_type=None, system_disk=None, security_groups=(), rec
     foreign = [n for n in inv["snapshots"] if not n.startswith("v2v-sync")]   # ours are transient
     if foreign:
         warnings.append(f"existing snapshots {foreign}: replication works, but consolidate them first if you can")
-    if len(inv["nics"]) > 1:
+    if networks is None and len(inv["nics"]) > 1:
         warnings.append(f"{len(inv['nics'])} NICs: the instance gets one public interface; "
-                        "additional networks must be attached as Exoscale Private Networks afterwards")
+                        "additional networks must be attached as Exoscale Private Networks afterwards "
+                        "(or migrate it in a group, whose manifest maps every port group)")
     if fam == "windows":
         notes.append("Windows: `create` stages virtio-win + rhsrvany on the receiver (needs internet egress from the receiver)")
     if fam == "unknown":
@@ -191,5 +251,6 @@ def build(inv, zone, target_type=None, system_disk=None, security_groups=(), rec
         "folds": [{"export": e["export"], "disk": e["disk"], "offset": e["offset"], "size": e["capacity"]}
                   for e in mapping if e["role"] == "fold"],
         "disks": mapping, "security_groups": list(security_groups),
+        "networks": networks or [], "anti_affinity_groups": list(anti_affinity_groups),
         "errors": errors, "warnings": warnings, "notes": notes,
     }

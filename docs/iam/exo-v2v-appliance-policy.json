@@ -10,7 +10,7 @@
         },
         {
           "action": "allow",
-          "expression": "operation in ['create-instance', 'create-block-storage-volume', 'register-ssh-key'] && parameters.name.startsWith('v2v-')"
+          "expression": "operation in ['create-instance', 'create-block-storage-volume', 'register-ssh-key', 'create-private-network', 'create-anti-affinity-group'] && parameters.name.startsWith('v2v-')"
         },
         {
           "action": "allow",
@@ -18,7 +18,7 @@
         },
         {
           "action": "allow",
-          "expression": "operation in ['start-instance', 'stop-instance', 'scale-instance', 'reset-instance', 'delete-instance'] && resources.instance.name.startsWith('v2v-')"
+          "expression": "operation in ['start-instance', 'stop-instance', 'scale-instance', 'reset-instance', 'delete-instance', 'update-instance'] && resources.instance.name.startsWith('v2v-')"
         },
         {
           "action": "allow",
@@ -30,11 +30,23 @@
         },
         {
           "action": "allow",
-          "expression": "operation == 'create-security-group' && parameters.name.startsWith('exo-v2v-')"
+          "expression": "operation == 'attach-instance-to-private-network' && resources.private_network.name.startsWith('v2v-')"
         },
         {
           "action": "allow",
-          "expression": "operation in ['add-rule-to-security-group', 'delete-security-group', 'detach-instance-from-security-group'] && resources.security_group.name.startsWith('exo-v2v-')"
+          "expression": "operation == 'delete-private-network' && resources.private_network.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'delete-anti-affinity-group' && resources.anti_affinity_group.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'create-security-group' && (parameters.name.startsWith('exo-v2v-') || parameters.name.startsWith('v2v-'))"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['add-rule-to-security-group', 'delete-security-group', 'detach-instance-from-security-group'] && (resources.security_group.name.startsWith('exo-v2v-') || resources.security_group.name.startsWith('v2v-'))"
         },
         {
           "action": "allow",

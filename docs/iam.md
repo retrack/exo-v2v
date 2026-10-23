@@ -1,20 +1,24 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.2.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.
 
-exo-v2v only uses the Compute service: instances, Block Storage volumes and
-security groups. Everything it creates follows fixed naming rules, which the
-role below uses to limit what the key can touch.
+exo-v2v only uses the Compute service: instances, Block Storage volumes,
+security groups and, for groups, private networks and anti-affinity groups.
+Everything it creates follows fixed naming rules, which the role below uses to
+limit what the key can touch.
 
 | Resource | Name |
 |---|---|
-| Target instance | `v2v-<migration>` |
+| Target instance | `v2v-<migration>` (group members: `v2v-<group>-<vm>`) |
 | Block Storage volumes | `v2v-<migration>-d<N>`, `v2v-<migration>-d<N>-4k` |
-| Security group | `exo-v2v-<migration>` |
+| Security group of a migration | `exo-v2v-<migration>` |
 | Temporary SSH key (registered by `exo` while it creates the instance, then deleted) | `v2v-<migration>-<timestamp>` |
+| Group private network | `v2v-<group>-<network>` (or a `v2v-*` network you name with `exoscale_name`) |
+| Group anti-affinity group | `v2v-<group>-<name>` |
+| Security groups a group manifest defines | `v2v-*` (or `exo-v2v-*`) |
 
 If you name the instance yourself with `create --instance-name`, start the name
 with `v2v-`, or the role below refuses it.
@@ -31,14 +35,17 @@ checked `parameters.labels`, while rules on names worked.
 | Rule | Allows |
 |---|---|
 | 1 | Every read operation (`get-*`, `list-*`) in Compute: zones, templates, instance types, and the state of the resources above |
-| 2 | Creating `v2v-*` instances, volumes and SSH keys |
+| 2 | Creating `v2v-*` instances, volumes, SSH keys, private networks and anti-affinity groups |
 | 3 | Deleting `v2v-*` SSH keys |
-| 4 | Starting, stopping, scaling, resetting and deleting `v2v-*` instances (reset: when the source system disk grows during replication, the target is re-imaged with a bigger root disk) |
+| 4 | Starting, stopping, scaling, resetting, renaming (`update-instance`, used by `cleanup` for a group member's final name) and deleting `v2v-*` instances. Reset: when the source system disk grows during replication, the target is re-imaged with a bigger root disk |
 | 5 | Attaching a `v2v-*` volume to a `v2v-*` instance |
 | 6 | Detaching, relabelling, resizing and deleting `v2v-*` volumes |
-| 7 | Creating `exo-v2v-*` security groups |
-| 8 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` security groups |
-| 9 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group`) |
+| 7 | Attaching instances to `v2v-*` private networks (with a static lease) |
+| 8 | Deleting `v2v-*` private networks |
+| 9 | Deleting `v2v-*` anti-affinity groups |
+| 10 | Creating `exo-v2v-*` and `v2v-*` security groups |
+| 11 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
+| 12 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group` or in a group manifest) |
 
 Everything else is denied, including every other Exoscale service. The
 operations in the rules are the ones exo-v2v calls through `exo` 1.103:
@@ -46,7 +53,14 @@ recorded during a full migration with 0.1.0 (create, sync, cutover with a
 volume rebuild, cleanup), plus the security-group attach and detach used by
 `plan --security-group` and by `cleanup` without `--delete-instance`. 0.2.0
 adds `resize-block-storage-volume` (a data disk that grows during replication)
-and `reset-instance` (a system disk that grows).
+and `reset-instance` (a system disk that grows). 0.3.0 adds what groups need:
+`create-private-network`, `attach-instance-to-private-network`,
+`delete-private-network`, `create-anti-affinity-group`,
+`delete-anti-affinity-group`, `update-instance` (rename), and `v2v-*` security
+groups. Exoscale evaluates `attach-instance-to-private-network` against the
+private network, not the instance: a rule on the instance name never matches it.
+
+To update an existing role: `exo iam role update exo-v2v-appliance --policy - < docs/iam/exo-v2v-appliance-policy.json`.
 
 Create the role and a key bound to it with the `exo` CLI, from an account that
 can manage IAM:
@@ -65,10 +79,13 @@ them with `exo config` or export them as `EXOSCALE_API_KEY` and
 ## Check the role before production
 
 We validated this role on 2026-10-19 with two complete migrations (Ubuntu 24.04,
-and AlmaLinux 9 with a volume rebuild) through `cleanup --delete-instance`, with
-every `exo` call made with the role's key. Rule 9 and the security-group detach
-in rule 8 were not exercised: those tests used neither `plan --security-group`
-nor `cleanup` without `--delete-instance`.
+and AlmaLinux 9 with a volume rebuild) through `cleanup --delete-instance`, on
+2026-10-21 with a data disk and a system disk that grew during replication,
+and on 2026-10-23 with three group runs (5 VMs): `group create` (private
+network, anti-affinity group, security groups, receivers attached to the
+private network with static leases), the cutovers, `group rollback`,
+`group cleanup --delete-instances`, and a hand-over `group cleanup` with a
+rename. Every `exo` call was made with the role's key.
 
 Run one migration of a small test VM with your new key too, through `cleanup
 --delete-instance`. A refused call stops exo-v2v with an error that names the
@@ -81,8 +98,11 @@ Run one migration of a small test VM with your new key too, through `cleanup
 - Rule 9 lets the key attach any security group to any instance. Exoscale
   evaluates that operation against the security group, not the instance.
 - Every rule matches names (`v2v-`, `exo-v2v-`), not labels. Do not give
-  other instances, volumes, SSH keys or security groups names with those
-  prefixes, or the key can manage them too.
+  other instances, volumes, SSH keys, private networks, anti-affinity groups or
+  security groups names with those prefixes, or the key can manage them too.
+- Rule 7 lets the key attach any `v2v-*` instance to a `v2v-*` private network.
+- A group member renamed at `cleanup` leaves the role's scope: that is the
+  hand-over (the key can no longer stop or delete it).
 
 ## A simpler alternative
 
