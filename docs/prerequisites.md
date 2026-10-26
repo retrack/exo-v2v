@@ -1,6 +1,6 @@
 # Prerequisites
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 Check these before your first migration. `exo-v2v plan` checks the source VM
 for you and refuses VMs it cannot migrate.
@@ -9,7 +9,7 @@ for you and refuses VMs it cannot migrate.
 
 | Item | Requirement |
 |---|---|
-| Version | vCenter Server or standalone ESXi, 6.7 or later. Tested on ESXi 7.0 Update 3. |
+| Version | vCenter Server ([roles, folders, tags, DRS](vcenter.md)) or standalone ESXi, 6.7 or later. Tested on ESXi 7.0 Update 3; vCenter against its simulator. |
 | Account | A vSphere account with the privileges below, passed to exo-v2v as `VSPHERE_HOST`, `VSPHERE_USER` and `VSPHERE_PASSWORD` |
 | Datastore space | Room for a short-lived snapshot of each VM during each sync cycle (the changes written while a cycle runs) |
 
@@ -33,7 +33,7 @@ appliance can serve many migrations.
 | Operating system | Ubuntu 24.04 or Debian 12 or later (any Linux with Python 3.10+ works) |
 | Size | 2 vCPU, 4 GiB RAM, 20 GB disk. Copy throughput is limited by the appliance's CPU; give it 4 vCPU for several migrations in parallel. |
 | SCSI controller | A **VMware Paravirtual (pvscsi)** controller with free slots, used to attach the snapshot disks. Add a second one if you run many migrations at once. |
-| Software | Python 3.10 or later, `ssh`, the [`exo` CLI](https://github.com/exoscale/cli) 1.102 or later, and exo-v2v (`pip install exo_v2v-*.whl`) |
+| Software | Python 3.10 or later, `ssh`, the [`exo` CLI](https://github.com/exoscale/cli) 1.102 or later, and exo-v2v (`pip install exo_v2v-*.whl`); systemd for [unattended replication](OPERATIONS.md#unattended-timers-and-alerts) |
 | Privileges | `sync`, `cutover` and `rollback` read block devices and must run as root (`sudo -E` keeps the environment variables) |
 
 Network access from the appliance:
@@ -46,6 +46,7 @@ Network access from the appliance:
 | `api.ipify.org` or `ifconfig.me` | TCP 443 | Detects the appliance's public address once per migration. Not needed if you pass `create --sender-cidr`. |
 | A rehearsal's relay (rehearsals only) | TCP 22 | The appliance drives the copies through it; the production receivers stream the root disks through it |
 | Group members' public IPs (groups only) | the health check ports | `group cutover` checks each tier from the appliance; the member's own security group opens those ports to the appliance only |
+| Your alert webhook (optional) | TCP 443 | [Alerts](OPERATIONS.md#unattended-timers-and-alerts) |
 
 The appliance's public address must stay the same during a migration: the
 migration's security group admits SSH from that address only.

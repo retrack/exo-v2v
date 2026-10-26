@@ -112,6 +112,10 @@ async function api(path) {
   return r.json();
 }
 
+function lagging(m, d) {
+  const t = ((m.sync || {}).last_ok) || (m.last_cycle || {}).t;
+  return d.lag_alert_s && ["syncing", "receiver-ready"].includes(m.phase) && t && d.now - t > d.lag_alert_s;
+}
 function lastCycle(c) {
   if (!c) return '<span class="muted">never</span>';
   return `${ago(c.t)} · ${bytes(c.covered)} in ${dur(c.seconds)}${c.final ? " · final" : ""}`;
@@ -135,8 +139,8 @@ function viewOverview(d) {
   const row = m => `<tr>
     <td><a href="#/m/${enc(m.name)}">${esc(m.name)}</a><div class="muted">${esc(m.vm)}</div></td>
     <td class="hide-s">${m.group ? `<a href="#/g/${enc(m.group)}">${esc(m.group)}</a>` : '<span class="muted">–</span>'}</td>
-    <td>${badge(m.phase)} ${busy(m.busy)}${m.down ? ` <span class="badge p-failed" title="exo-v2v recover ${esc(m.name)}">receiver down</span>` : ""}</td>
-    <td>${lastCycle(m.last_cycle)}</td>
+    <td>${badge(m.phase)} ${busy(m.busy)}${m.down ? ` <span class="badge p-failed" title="exo-v2v recover ${esc(m.name)}">receiver down</span>` : ""}${(m.sync || {}).failures ? ` <span class="badge p-failed" title="${esc(m.sync.last_error || "")}">${esc(m.sync.failures)} failed</span>` : ""}</td>
+    <td${lagging(m, d) ? ' class="warn" title="older than the lag alert threshold"' : ""}>${lastCycle(m.last_cycle)}</td>
     <td class="mono hide-s">${esc(m.ip || "–")}${m.private_ips.length ? `<div class="muted">${m.private_ips.map(esc).join(" ")}</div>` : ""}</td>
     <td class="num">${m.downtime_s != null ? dur(m.downtime_s) : '<span class="muted">–</span>'}</td></tr>`;
   const rows = live.map(row).join("") + (cleaned.length ? `<tr><td colspan="6"><a href="#" id="togglecleaned">${showCleaned ? "hide" : "show"} ${cleaned.length} cleaned-up migration(s)</a></td></tr>` : "")

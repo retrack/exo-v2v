@@ -1,6 +1,6 @@
 # Moving an application (groups)
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A group moves several VMs that work together, for example a load balancer, a
 few application servers and a database, as one unit. Every VM is replicated
@@ -32,6 +32,7 @@ and the [web status page](web.md) show them, and their logs are in
 
 ```bash
 exo-v2v group discover shop --vm lb01 --vm app01 --vm app02 --vm db01 --zone ch-gva-2   # draft shop.yaml
+#   or --folder DC1/vm/shop, --tag app:shop (vCenter), mixed with --vm
 vi shop.yaml                                     # tiers, security groups, health checks, hooks
 exo-v2v group plan     shop -f shop.yaml         # every member's plan + the cutover runbook
 exo-v2v group create   shop                      # private networks, anti-affinity groups, receivers

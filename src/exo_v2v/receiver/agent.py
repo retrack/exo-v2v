@@ -388,8 +388,18 @@ class Handler(BaseHTTPRequestHandler):
             # will see them (4Kn) and the volume groups across all disks
             data = data_exports(self.exports)
             reps = {k: guestfix.analyze(v) for k, v in data.items()}
-            lvm = guestfix.lvm_report(list(self.exports.values()))
+            # the system disk as the guest has it: through the boot mask (its partition
+            # table is in a side file until the conversion)
+            with bootmask.view("sda", MASKS.get("sda"), self.exports.get("sda", "")) as sda:
+                devs = dict(self.exports, **({"sda": sda} if sda else {}))
+                lvm = guestfix.lvm_report(list(devs.values()))
+            if sda and sda != self.exports.get("sda"):          # name the disk, not the view
+                lvm = json.loads(json.dumps(lvm).replace(sda, self.exports["sda"]))
             by_dev = {v: k for k, v in self.exports.items()}
+            if sda is None:
+                lvm["problems"].setdefault(self.exports.get("sda", "sda"), []).append(
+                    "the system disk's partition table is in the boot mask and no view could be built "
+                    "(dmsetup missing): volume groups spanning it are not checked")
             for d, probs in lvm["problems"].items():
                 k = by_dev.get(d)
                 if k in reps:

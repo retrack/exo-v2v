@@ -1,6 +1,6 @@
 # exo-v2v architecture
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## Components
 
@@ -310,6 +310,43 @@ the options).
   name (`v2v-<name>-*-rh*`) of instances, volumes and snapshots, the networks
   and the relay's security group. `exo-v2v gc` destroys the rehearsals past
   their TTL.
+
+## vCenter
+
+`VC.vm()` takes a name, an inventory path (`searchIndex.FindByInventoryPath`) or
+`uuid:` (instance UUID). Names are matched with one `RetrievePropertiesEx` over a
+container view (`name`, `config.template`), not one property read per VM; a name
+shared by several VMs is refused with their paths. The plan records the
+instance UUID and the path; `vm_of(plan)` finds the VM by UUID first. Folders
+are walked with a container view rooted at the folder. Tags come from the
+vSphere Automation API (`vapi.py`: `/api/session` or `/rest/com/vmware/cis/session`,
+`tag-association … list-attached-objects-on-tags`), returning managed object IDs
+that become `vim.VirtualMachine` references. `missing_privileges` calls
+`AuthorizationManager.HasPrivilegeOnEntities` on the VM, its datastores and the
+appliance; `appliance_checks` compares the VM's datastores with those of the
+appliance's host and reads the cluster's DRS configuration and the appliance's
+override. The simulator tests (`tests/test_vcsim.py`) load
+`tests/vcsim/sitecustomize.py`, which reads properties through the
+PropertyCollector (vcsim's reply to pyVmomi 9's `Fetch` of an unset property does
+not parse) and maps two enums vcsim leaves empty.
+
+## Unattended replication and alerts
+
+`exo-v2v service install` writes a systemd oneshot service and a timer per
+migration (`sync NAME`), per group (`group sync G`) or for `watch`; the timer's
+`OnUnitInactiveSec` starts the next run after the previous one ended. The units
+read the credentials from a root-only environment file and run with the `PATH`
+of the installer (which `exo` they call) and `HOME=/root` (the `exo` CLI needs
+one). A cutover removes the timers once its sources are about to stop.
+
+Alerts are POSTs of `{"text", "event", "host", "time", ...}` to the webhook of
+`$EXO_V2V_HOME/config.yaml`; a failure to send is logged, never raised. `sync`
+counts failed cycles in the migration's state (`sync.failures`, `last_error`,
+`last_ok`; `die` keeps its last message) and alerts once per streak; a lock held
+by another run is not a failure. `watch` computes the lag from the state files
+and remembers what it alerted in `alerts.json`, so it never writes a migration's
+state while a sync may be saving it. `receiver_down` alerts once per outage (the
+`down` record that `recover` clears).
 
 ## Web status page
 

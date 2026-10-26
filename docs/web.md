@@ -1,6 +1,6 @@
 # Web status page
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v web` serves a read-only page with the state of every migration and
 group on the replication appliance: phases, the last cycles, cutover steps,
@@ -18,7 +18,7 @@ Run it as the user that runs the migrations (`sudo -E`, the same
 
 | Page | Content |
 |---|---|
-| Overview | Groups (cutover state, members by tier and phase), every migration: phase, a sync or cutover running now, last cycle, public and private addresses, downtime |
+| Overview | Groups (cutover state, members by tier and phase), every migration: phase, a sync or cutover running now, a receiver down, failed cycles in a row (the last error on hover), last cycle (highlighted when older than the [lag alert](OPERATIONS.md#unattended-timers-and-alerts) threshold), public and private addresses, downtime |
 | Migration | Phase, source VM, receiver, a chart of the data copied per cycle (full, delta, final), disks and where they go, networks with the Exoscale MACs, the cutover steps with their times, plan and preflight messages, events |
 | Rehearsal | Its copies (phase, address, seed and boot times, health from the relay), its steps, networks, the names the copies tried to resolve, the TTL |
 | Group | Members by tier with their health check results, the cutover steps (preflight, warm cycle, tiers off, conversions, tiers up, hooks) with their times, networks, a member's log, events |

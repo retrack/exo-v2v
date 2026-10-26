@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 — 2026-10-26
+
+- **vCenter** (tested against govmomi's vcsim; vMotion, Storage vMotion, DRS and
+  privilege enforcement need a real vCenter and are untested):
+  - A VM is named by name, by inventory path (`DC1/vm/shop/web01`) or by
+    instance UUID (`uuid:...`); a name that several VMs share is refused with
+    their paths, templates never match. A migration finds its VM by instance
+    UUID afterwards, so renaming or moving it in vCenter is harmless. The name
+    lookup is one PropertyCollector query instead of one call per VM.
+  - `group discover --folder DC/vm/shop` (recursive) and `--tag CATEGORY:TAG`
+    (vSphere Automation API, `/api` or `/rest`), with `--vm`; the draft
+    manifest uses a path when a name is ambiguous.
+  - `plan` reports the privileges the vSphere account lacks
+    (HasPrivilegeOnEntities) and, run on the appliance, a source datastore its
+    host does not mount and a fully automated DRS on the appliance; `sync`
+    refuses the first and warns about the second.
+  - `VSPHERE_HOST` may carry a port (`vcenter.example.com:8443`).
+- **Unattended replication.** `exo-v2v service install NAME | --group G |
+  --watch [--every 1h]` writes systemd timers on the appliance (one cycle per
+  run, the next `--every` after the previous one ended; `--write-env` keeps the
+  credentials in a root-only file); `service list / remove`. A cutover removes
+  the timers of what it moves once the sources stop; `cleanup` too.
+- **Alerts** to a webhook (`$EXO_V2V_HOME/config.yaml`: `alerts: {webhook, lag,
+  failures}`; JSON with a `text` field for Slack, Mattermost or Teams): cycles
+  failing N times in a row and back, a migration lagging past its threshold and
+  back (`exo-v2v watch`, which also destroys expired rehearsals), a receiver
+  found down (once per outage), cutovers done or stopped, a rehearsal destroyed
+  at its TTL. `exo-v2v alert test`. `status` and the web page show failed
+  cycles, the last error and the lag.
+- **Preflight through the boot mask** (regression in 0.4.1): the sync-time
+  preflight read the system disk directly, whose boot sectors the mask keeps
+  in RAM, so it missed a volume group spanning the system disk and a data disk
+  (which needs `--fold`): the group cutover went ahead and the conversion
+  failed. It now reads a device-mapper view with the boot sectors put back.
+  Rehearsals refuse such members too (`--vm` leaves them out).
+- **Receiver agents follow the appliance**: `sync` upgrades a receiver whose
+  agent is another version in place, between two cycles (same boot, change IDs
+  kept), so fixes like the one above reach existing migrations.
+- **Python 3.10 and 3.11** (Debian 12): exo-v2v could not even start since
+  0.1.0, because one f-string used syntax only Python 3.12 accepts. Fixed.
+- **CI** on GitHub Actions: unit tests on Python 3.10, 3.12 and 3.13, the
+  vCenter tests against vcsim, the receiver's disk handling on loop devices
+  (GPT/MBR, NTFS, LVM, XFS rebuilds), a strict docs build, the wheel.
+
 ## 0.4.1 — 2026-10-26
 
 Safety fix: a target instance that restarted during the replication booted the

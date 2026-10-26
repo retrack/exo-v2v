@@ -2,7 +2,7 @@
 with a coordinated cutover (stop front to back, convert in parallel, start
 back to front with health checks between the tiers) and an ordered rollback.
 
-  exo-v2v group discover NAME --vm A --vm B ... --zone Z [-o NAME.yaml]
+  exo-v2v group discover NAME --vm A --vm B ... | --folder DC/vm/shop | --tag CATEGORY:TAG --zone Z [-o NAME.yaml]
   exo-v2v group plan     NAME -f NAME.yaml
   exo-v2v group create   NAME
   exo-v2v group sync     NAME [--every S] [--cycles N]
@@ -67,7 +67,8 @@ def slug(s):
 
 
 def member_name(group, vm):
-    return f"{group}-{slug(vm)}"
+    """GROUP-VM; `vm` may be an inventory path (DC/vm/folder/web01): its last part counts."""
+    return f"{group}-{slug(vm.rsplit('/', 1)[-1])}"
 
 
 def load_manifest(path):
@@ -115,6 +116,10 @@ def validate(m, where="manifest"):
             bad(f"vm {v['vm']}: unknown keys {sorted(unknown)}")
         if v["vm"] in seen:
             bad(f"vm {v['vm']} listed twice")
+        twin = next((o for o in seen if member_name("g", o) == member_name("g", v["vm"])), None)
+        if twin:
+            bad(f"vms {twin} and {v['vm']} have the same name: their migrations would collide "
+                "(rename one in vSphere, or put it in another group)")
         seen.add(v["vm"])
         v.setdefault("tier", 1)
         if not isinstance(v["tier"], int) or v["tier"] < 1:
@@ -355,16 +360,66 @@ def run_members(g, a, members, argsfn, parallel):
 
 # ---------------- commands ----------------
 
+def discover_vms(vc, names=(), folders=(), tags=()):
+    """The VMs named, in the folders (recursively) and carrying the tags
+    (CATEGORY:TAG, vCenter only), without duplicates, in that order."""
+    from .vapi import Vapi, VapiError
+    out, seen = [], set()
+
+    def add(v):
+        if v._moId not in seen:
+            seen.add(v._moId)
+            out.append(v)
+    for n in names:
+        add(vc.vm(n))
+    for f in folders:
+        for v in vc.folder_vms(f):
+            add(v)
+    if tags:
+        try:
+            api = Vapi(vc.host, vc.port, vc.user, vc.password, vc.insecure)
+        except VapiError as e:
+            die(f"--tag: {e}")
+        try:
+            for t in tags:
+                cat, _, tag = t.partition(":")
+                if not tag:
+                    die(f"--tag {t!r}: CATEGORY:TAG")
+                try:
+                    ids = api.tagged_vms(cat, tag)
+                except VapiError as e:
+                    die(f"--tag {t}: {e}")
+                if not ids:
+                    log(f"--tag {t}: no VM carries it")
+                for moid in ids:
+                    add(vc.by_moid(moid))
+        finally:
+            api.close()
+    return out
+
+
 def cmd_discover(a):
     """Draft manifest from vSphere: the VMs' NICs, port groups and addresses."""
     from .cli import vsphere_connect
+    if not (a.vm or a.folder or a.tag):
+        die("name the VMs: --vm NAME|PATH, --folder DC/vm/FOLDER or --tag CATEGORY:TAG")
     V, vc = vsphere_connect(a)
     invs = []
     try:
-        for name in a.vm:
-            invs.append(V.inventory(vc, vc.vm(name)))
+        vms = discover_vms(vc, a.vm or [], a.folder or [], a.tag or [])
+        if not vms:
+            die("no VM found")
+        names = {}
+        for _v, pr in vc.vms():
+            if not pr.get("config.template"):
+                names[pr.get("name")] = names.get(pr.get("name"), 0) + 1
+        for v in vms:
+            inv = V.inventory(vc, v)
+            inv["ref"] = inv["name"] if names.get(inv["name"]) == 1 else inv["path"]   # a path when ambiguous
+            invs.append(inv)
     finally:
         vc.close()
+    log(f"{len(invs)} VMs: " + ", ".join(i["ref"] for i in invs))
     # Tools rarely say DHCP or static: a port group carrying the default route of a VM
     # with several NICs is its front end (public interface), every other one private
     pgs, front = {}, set()
@@ -402,7 +457,7 @@ def cmd_discover(a):
           "#   v2v-" + a.name + "-web: [tcp/80 0.0.0.0/0, tcp/443 0.0.0.0/0]", "",
           "vms:                             # tier 1 = started first, stopped last (databases)"]
     for inv in invs:
-        L += [f"  - vm: {inv['name']}", "    tier: 1",
+        L += [f"  - vm: {inv['ref']}", "    tier: 1",
               "    security_groups: []          # existing Exoscale security groups, attached at cutover",
               "    # health: {tcp: 22}          # or {http: \"http://{public_ip}/\", expect: \"text\"} or {command: ...}"]
         for nic in inv["nics"]:
@@ -438,7 +493,10 @@ def cmd_plan(a):
             die(f"group {a.name} has members past the plan ({', '.join(busy)}): cleanup first")
     V, vc = vsphere_connect(a)
     try:
-        invs = {v["vm"]: V.inventory(vc, vc.vm(v["vm"])) for v in m["vms"]}
+        from .cli import vsphere_warnings
+        objs = {v["vm"]: vc.vm(v["vm"]) for v in m["vms"]}
+        invs = {k: V.inventory(vc, o) for k, o in objs.items()}
+        vwarn = {k: vsphere_warnings(V, vc, o) for k, o in objs.items()}
     finally:
         vc.close()
     ex = Exo(m["zone"], a.account)
@@ -458,6 +516,7 @@ def cmd_plan(a):
                           fold=v.get("fold") or [], auto_fold=not v.get("no_fold"),
                           networks=nets, anti_affinity_groups=aags)
         p["errors"] += nerr
+        p["warnings"] += vwarn[v["vm"]]
         p["inventory"] = invs[v["vm"]]
         p["group"], p["tier"], p["final_name"] = m["name"], v["tier"], v.get("name")
         p["health"] = v.get("health") or {}
@@ -639,6 +698,7 @@ def ctx_of(g):
         d = {"public_ip": r.get("ip", ""), "private_ip": next(iter(privs.values()), ""),
              "name": r.get("name", ""), "vm": x["vm"], **{f"ip.{k}": v for k, v in privs.items()}}
         out[x["vm"]] = d
+        out.setdefault(x["vm"].rsplit("/", 1)[-1], d)     # {web01.public_ip} for DC/vm/shop/web01
     return out
 
 
@@ -825,6 +885,10 @@ def cmd_cutover(a):
                     with log_prefix(x["vm"]):
                         open_egress(State.load(x["migration"]), ex)
                 mark("egress_open")
+            from .service import stop_for
+            stop_for(group=a.name)                 # no timed rounds or member cycles once sources stop
+            for x in g.members():
+                stop_for(migration=x["migration"])
             ctx = ctx_of(g)
             if "pre_hook" not in steps:
                 run_hook(g, "pre_cutover", ctx)
@@ -932,12 +996,17 @@ def cmd_cutover(a):
         cut.update(state="done", ended=time.time(), window_s=round(time.time() - steps["stop_started"]))
         g.save()
         g.event(f"cutover done: window {cut['window_s']}s (first stop -> last tier healthy)")
+        from . import alerts
+        alerts.send("cutover-done", f"group {a.name}: cut over, window {cut['window_s']}s", group=a.name)
         print_status(g)
         print(f"next: test the application, then `exo-v2v group cleanup {a.name}` (or `group rollback`)")
     except GroupFailure as e:
         cut.update(state="failed", error=str(e), failed_at=time.time())
         g.save()
         g.event(f"CUTOVER STOPPED: {e}")
+        from . import alerts
+        alerts.send("cutover-failed", f"group {a.name}: cutover stopped: {e}"
+                    + (" (rolling back)" if c["rollback_on_failure"] else ""), group=a.name)
         live = [ch for ch in children.values() if ch is not None and ch.poll() is None]
         if c["rollback_on_failure"]:
             for ch in live:
@@ -978,7 +1047,7 @@ def do_rollback(g, a):
             for x in g.of_tier(tier):
                 st = sts[x["vm"]]
                 if st["phase"] in ("planned", "cleaned", "rolled-back") and \
-                        str(vc.vm(st["plan"]["vm"]).runtime.powerState) == "poweredOn":
+                        str(vc.vm_of(st["plan"]).runtime.powerState) == "poweredOn":
                     continue
                 rollback(st, a, V, vc, wait_tools=getattr(a, "tools_timeout", 600))
             g.event(f"tier {tier} back on VMware")
@@ -1002,6 +1071,8 @@ def cmd_cleanup(a):
     from .cli import cleanup
     g = Group.load(a.name)
     g.lock("cleanup")
+    from .service import stop_for
+    stop_for(group=a.name)
     for x in g.members():
         st = State.load(x["migration"])
         if st["phase"] == "cleaned":
@@ -1093,7 +1164,9 @@ def add_parser(sub):
                         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     gs = gp.add_subparsers(dest="gcmd", required=True)
     s = gs.add_parser("discover", help="draft manifest from vSphere")
-    s.add_argument("name"); s.add_argument("--vm", action="append", required=True)
+    s.add_argument("name"); s.add_argument("--vm", action="append", help="VM name or inventory path (repeatable)")
+    s.add_argument("--folder", action="append", help="every VM of this inventory folder, recursively (DC/vm/shop)")
+    s.add_argument("--tag", action="append", help="every VM with this vCenter tag, CATEGORY:TAG (repeatable)")
     s.add_argument("--zone", required=True); s.add_argument("-o", "--output")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_discover)
     s = gs.add_parser("plan", help="plan every member from the manifest")

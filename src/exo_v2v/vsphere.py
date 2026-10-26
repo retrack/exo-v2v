@@ -58,7 +58,7 @@ from .receiver import nbdproto as P
 try:
     from pyVim.connect import Disconnect, SmartConnect
     from pyVim.task import WaitForTask
-    from pyVmomi import vim
+    from pyVmomi import vim, vmodl
 except ImportError:  # pragma: no cover
     sys.exit("exo-v2v needs pyvmomi >= 8: pip install pyvmomi")
 
@@ -73,25 +73,93 @@ from .util import log
 # ---------------- vSphere ----------------
 
 class VC:
+    """A vCenter or standalone ESXi session. `host` may carry a port (vcenter:8443)."""
+
     def __init__(self, host, user, password, insecure=True):
         ctx = ssl._create_unverified_context() if insecure else None
-        self.host = host
-        self.si = SmartConnect(host=host, user=user, pwd=password, sslContext=ctx)
+        self.host, _, port = host.partition(":")
+        self.port = int(port or 443)
+        self.si = SmartConnect(host=self.host, port=self.port, user=user, pwd=password, sslContext=ctx)
         self.content = self.si.RetrieveContent()
         self.ssl = ctx or ssl.create_default_context()
+        self.user, self.password, self.insecure = user, password, insecure
 
     def close(self):
         Disconnect(self.si)
 
-    def vm(self, name):
-        view = self.content.viewManager.CreateContainerView(self.content.rootFolder, [vim.VirtualMachine], True)
+    def about(self):
+        a = self.content.about
+        return {"product": a.fullName, "api_type": a.apiType, "version": a.apiVersion,
+                "vcenter": a.apiType == "VirtualCenter"}
+
+    def vms(self, props=("name", "config.template"), root=None):
+        """[(vm, {prop: value})] for every VM under `root` (default: the whole
+        inventory), in one PropertyCollector round trip per page - a vCenter
+        with thousands of VMs answers in seconds, not one call per VM."""
+        view = self.content.viewManager.CreateContainerView(root or self.content.rootFolder, [vim.VirtualMachine], True)
+        pc = vmodl.query.PropertyCollector
         try:
-            hits = [v for v in view.view if v.name == name]
+            spec = pc.FilterSpec(
+                objectSet=[pc.ObjectSpec(obj=view, skip=True, selectSet=[
+                    pc.TraversalSpec(name="view", path="view", skip=False, type=vim.view.ContainerView)])],
+                propSet=[pc.PropertySpec(type=vim.VirtualMachine, pathSet=list(props))])
+            out, res = [], self.content.propertyCollector.RetrievePropertiesEx([spec], pc.RetrieveOptions())
+            while res:
+                out += [(o.obj, {x.name: x.val for x in (o.propSet or [])}) for o in res.objects]
+                res = self.content.propertyCollector.ContinueRetrievePropertiesEx(res.token) if res.token else None
+            return out
         finally:
             view.Destroy()
-        if len(hits) != 1:
-            sys.exit(f"VM {name!r}: {len(hits)} matches")
+
+    def path(self, obj):
+        """Inventory path, e.g. DC1/vm/shop/web01 (what FindByInventoryPath takes)."""
+        parts = []
+        while obj is not None and obj != self.content.rootFolder:
+            parts.append(obj.name)
+            obj = obj.parent
+        return "/".join(reversed(parts))
+
+    def vm(self, ref):
+        """A VM by name, by inventory path (DC/vm/folder/name) or by instance
+        UUID (uuid:...). Templates never match; a name that several VMs share
+        (several datacenters or folders) is refused with their paths."""
+        if ref.startswith("uuid:"):
+            v = self.content.searchIndex.FindByUuid(uuid=ref[5:], vmSearch=True, instanceUuid=True)
+            if v is None:
+                sys.exit(f"no VM with instance UUID {ref[5:]}")
+            return v
+        if "/" in ref:
+            v = self.content.searchIndex.FindByInventoryPath(ref.strip("/"))
+            if not isinstance(v, vim.VirtualMachine):
+                sys.exit(f"{ref!r}: no VM at that inventory path (e.g. Datacenter/vm/folder/name)")
+            return v
+        hits = [v for v, pr in self.vms() if pr.get("name") == ref and not pr.get("config.template")]
+        if not hits:
+            sys.exit(f"VM {ref!r} not found")
+        if len(hits) > 1:
+            sys.exit(f"VM {ref!r} is ambiguous ({len(hits)} VMs have that name): use its inventory path, "
+                     + " or ".join(repr(self.path(v)) for v in hits))
         return hits[0]
+
+    def vm_of(self, plan):
+        """The VM a plan was made for: by its instance UUID (survives renames and
+        folder moves), else by the name or path given to `plan`."""
+        uuid = (plan.get("inventory") or {}).get("instance_uuid")
+        if uuid:
+            v = self.content.searchIndex.FindByUuid(uuid=uuid, vmSearch=True, instanceUuid=True)
+            if v is not None:
+                return v
+        return self.vm(plan["vm"])
+
+    def by_moid(self, moid):
+        return vim.VirtualMachine(moid, self.si._stub)
+
+    def folder_vms(self, path):
+        """Every VM (not templates) in an inventory folder and its subfolders."""
+        f = self.content.searchIndex.FindByInventoryPath(path.strip("/"))
+        if not isinstance(f, (vim.Folder, vim.Datacenter, vim.ResourcePool, vim.ComputeResource)):
+            sys.exit(f"{path!r}: no folder at that inventory path (e.g. Datacenter/vm/shop)")
+        return [v for v, pr in self.vms(root=f) if not pr.get("config.template")]
 
     def cookie(self):
         # pyvmomi keeps 'vmware_soap_session="..."; Path=/; ...' on the stub
@@ -175,6 +243,9 @@ def inventory(vc, vm):
     return {
         "boot_disk": boot, "boot_disk_source": boot_how, "guest_mounts": mounts,
         "name": vm.name, "power": str(vm.runtime.powerState), "guest_id": cfg.guestId,
+        "instance_uuid": cfg.instanceUuid, "path": vc.path(vm), "server": vc.about(),
+        "host": vm.runtime.host.name if vm.runtime.host else None,
+        "datastores": sorted(ds.name for ds in vm.datastore),
         "guest_full": cfg.guestFullName, "firmware": cfg.firmware,
         "secure_boot": bool(getattr(cfg.bootOptions, "efiSecureBootEnabled", False)),
         "vtpm": any(type(d).__name__.endswith("VirtualTPM") for d in cfg.hardware.device),
@@ -189,6 +260,61 @@ def inventory(vc, vm):
                    "change_id": getattr(d.backing, "changeId", None),
                    "mode": getattr(d.backing, "diskMode", "")} for k, d in sorted(disks.items())],
     }
+
+
+# What exo-v2v does with the account (docs/prerequisites.md), checked by `plan`
+PRIVILEGES = {
+    "source VM": ["VirtualMachine.State.CreateSnapshot", "VirtualMachine.State.RemoveSnapshot",
+                  "VirtualMachine.Config.ChangeTracking", "VirtualMachine.Interact.PowerOff",
+                  "VirtualMachine.Interact.PowerOn", "VirtualMachine.Provisioning.DiskRandomRead"],
+    "appliance VM": ["VirtualMachine.Config.AddExistingDisk", "VirtualMachine.Config.RemoveDisk"],
+    "datastore": ["Datastore.FileManagement"],
+}
+
+
+def missing_privileges(vc, vm, proxy=None):
+    """["PRIV on KIND NAME"] the session lacks (HasPrivilegeOnEntities: it follows
+    roles granted on parent folders, clusters and datacenters). None when the
+    server cannot tell."""
+    targets = [("source VM", vm)] + ([("appliance VM", proxy)] if proxy is not None else []) + \
+        [("datastore", ds) for ds in vm.datastore]
+    am = vc.content.authorizationManager
+    try:
+        key = vc.content.sessionManager.currentSession.key
+        out = []
+        for kind, ent in targets:
+            for r in am.HasPrivilegeOnEntities(entity=[ent], sessionId=key, privId=PRIVILEGES[kind]):
+                out += [f"{x.privId} on {kind} {ent.name}" for x in (r.privAvailability or []) if not x.isGranted]
+        return out
+    except (vmodl.MethodFault, AttributeError, TypeError):
+        return None
+
+
+def appliance_checks(vc, vm, proxy):
+    """(errors, warnings) about the appliance and a source VM: hot-add needs the
+    appliance's host to mount every datastore of the VM; DRS must not move the
+    appliance (vMotion) while snapshot disks are attached to it."""
+    errors, warnings = [], []
+    host = proxy.runtime.host
+    seen = set(host.datastore) if host else set()
+    for ds in vm.datastore:
+        if host and ds not in seen:
+            errors.append(f"the appliance runs on host {host.name}, which does not mount datastore {ds.name} "
+                          f"of {vm.name}: hot-add needs it (run the appliance on a host that sees it, or "
+                          "use --transport http, slower)")
+    cluster = host.parent if host and isinstance(host.parent, vim.ClusterComputeResource) else None
+    if cluster is not None:
+        drs = cluster.configurationEx.drsConfig
+        if drs and drs.enabled:
+            behavior, on = str(drs.defaultVmBehavior), True
+            for c in cluster.configurationEx.drsVmConfig or []:
+                if c.key == proxy:
+                    behavior, on = str(c.behavior or behavior), c.enabled is not False
+            if on and behavior == "fullyAutomated":
+                warnings.append(f"DRS of cluster {cluster.name} may move the appliance {proxy.name} while "
+                                "snapshot disks are attached to it: add a VM override for it (automation "
+                                "level: Disabled, or Partially automated)")
+    return errors, warnings
 
 
 def nics_of(vm):
@@ -315,14 +441,14 @@ class FlatReader:
         dc = vc.datacenter_of(vm)
         q = urllib.parse.urlencode({"dcPath": dc.name, "dsName": ds})
         self.path = f"/folder/{urllib.parse.quote(path)}?{q}"
-        self.host, self.cookie, self.ssl = vc.host, vc.cookie(), vc.ssl
+        self.host, self.port, self.cookie, self.ssl = vc.host, vc.port, vc.cookie(), vc.ssl
         self.conn = None
 
     def read(self, start, length, tries=4):
         for attempt in range(tries):
             try:
                 if self.conn is None:
-                    self.conn = http.client.HTTPSConnection(self.host, 443, context=self.ssl, timeout=120)
+                    self.conn = http.client.HTTPSConnection(self.host, self.port, context=self.ssl, timeout=120)
                 self.conn.request("GET", self.path, headers={"Cookie": self.cookie,
                                                              "Range": f"bytes={start}-{start + length - 1}"})
                 r = self.conn.getresponse()

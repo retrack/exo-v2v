@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -32,6 +32,8 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs |
 | **Rehearsal** | Copies of the VMs started from their replicas, converted as at cutover, [**airgapped**](docs/rehearsal.md) (no public IP, isolated networks, no router) and reachable only by SSH through a relay; health checks, a predicted cutover window, the outside names the copies tried to resolve; the sources and replication carry on |
 | Status page | A read-only [web page](docs/web.md) on the appliance with every migration and group |
+| vCenter | VMs by name, inventory path or UUID; groups from a [folder or a tag](docs/vcenter.md); `plan` checks the account's privileges, the appliance's datastores and DRS |
+| Unattended | Replication on systemd timers, [webhook alerts](docs/OPERATIONS.md#unattended-timers-and-alerts) (failing or lagging replication, a target that restarted, cutovers); a target that restarts boots nothing and is recovered with one command |
 | Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](docs/limitations.md)) |
 
 ## Documentation
@@ -42,6 +44,7 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 |---|---|
 | [How it works](docs/concepts.md) | The replication appliance, sync cycles, cutover, guest adaptation, security model |
 | [Prerequisites](docs/prerequisites.md) | vSphere privileges, the appliance, network flows, Exoscale account |
+| [vCenter](docs/vcenter.md) | The role, folders and tags, where the appliance runs, DRS |
 | [IAM role](docs/iam.md) | A least-privilege Exoscale role for the appliance's API key |
 | [Receiver templates](docs/receiver-templates.md) | Templates that boot straight into the receiver: faster `create`, no mirror access |
 | [Supported operating systems](docs/supported-os.md) | Tested and expected-to-work guests |
@@ -51,6 +54,7 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 | [Web status page](docs/web.md) | The read-only status page and its API |
 | [Operations runbook](docs/OPERATIONS.md) | Step-by-step migration, rollback, troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Design details for contributors |
+| [Project status](docs/status.md) | What is tested, and what it takes to drop the "Experimental" label |
 
 ## Requirements
 
@@ -64,8 +68,8 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.1/exo_v2v-0.4.1-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.4.1   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.5.0/exo_v2v-0.5.0-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.5.0   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -140,6 +144,7 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 | Debian 13 under continuous write load (3 delta cycles) | pass | 298 s |
 | AlmaLinux 9, 4 disks on paravirtual SCSI + NVMe, XFS-512 logical volume spanning two disks (rebuilt across two new volumes), with and without a receiver template | 2/2 | 9–10 min¹ |
 | AlmaLinux 9 with its root volume group extended onto a second disk (carried inside the root disk), on a 3-level snapshot chain; during replication: snapshot deleted, snapshot reverted, data disk grown, system disk grown, disk hot-added | pass | 9 min¹ |
+| A group of 10 VMs on 18 disks (55 GB: AlmaLinux 9 with LVM spans and a snapshot chain, Debian 13, Ubuntu 24.04, Windows Server 2022 and 2025), one appliance with 4 vCPU | full copy 15 min, delta round 2 min; rehearsal of 8; group cutover: pass | window 803 s |
 | A group: HAProxy (Debian 13, 2 NICs), 2 application servers (AlmaLinux 9, Ubuntu 24.04), PostgreSQL (AlmaLinux 9, XFS-512 data disk), plus a Windows Server 2022 member; static private addresses kept on a private network | 3 coordinated cutovers: pass; a conversion failure stopped the group and `group rollback` restored it on VMware; the group process killed mid-cutover, then resumed | window 461–486 s |
 
 ¹ Without `--verify`; these runs used it (every disk hash-compared before conversion, about 13–15 more minutes on the lab's HDD datastore).

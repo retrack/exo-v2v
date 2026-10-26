@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdisk
+      - run: pip install pyvmomi pyyaml pytest
+      - run: python -m pytest -q tests/
+      - run: bash tests/test_netfix.sh
+
+  vcsim:
+    name: vCenter code paths (govmomi vcsim)
+    runs-on: ubuntu-24.04
+    env:
+      GOVMOMI: v0.56.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyvmomi pyyaml pytest
+      - name: vcsim
+        run: |
+          base=https://github.com/vmware/govmomi/releases/download/$GOVMOMI
+          curl -sSLf -o vcsim_Linux_x86_64.tar.gz $base/vcsim_Linux_x86_64.tar.gz
+          curl -sSLf -o checksums.txt $base/checksums.txt
+          grep " vcsim_Linux_x86_64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf vcsim_Linux_x86_64.tar.gz vcsim
+      - run: VCSIM=$PWD/vcsim python -m pytest -q tests/test_vcsim.py
+
+  receiver:
+    name: receiver disk handling (loop devices, LVM, NTFS)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdisk xfsprogs xfsdump lvm2 ntfs-3g parted dosfstools
+      - run: bash tests/test_guestfix.sh
+      - run: bash tests/test_lvm.sh
+
+  docs:
+    name: docs (mkdocs --strict)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mkdocs==1.6.1 mkdocs-material==9.6.14
+      - run: mkdocs build --strict
+
+  wheel:
+    name: wheel
+    needs: [test, vcsim, receiver, docs]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip wheel --no-deps -w dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exo-v2v-wheel
+          path: dist/*.whl

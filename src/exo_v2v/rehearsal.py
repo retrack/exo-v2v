@@ -667,6 +667,10 @@ def preflight(rh, sts, ex):
             ex.template_boot_mode(tpl, vis)
         except ExoError:
             problems.append(f"{vm}: receiver template {tpl} ({vis}) not found: rehearsal copies need one")
+        for export, r in ((st.data.get("preflight") or {}).get("disks") or {}).items():
+            for prob in r.get("problems", []):          # what the cutover would refuse too
+                if any(k in prob for k in ("dynamic disk", "Storage Spaces", "fold the volumes")):
+                    problems.append(f"{vm} {export}: {prob} (leave it out with --vm, or plan it again)")
     try:
         lim = {x["resource"]: x for x in ex.run("limits")}
         i, pn = lim.get("Compute instances", {}), lim.get("Private networks", {})
@@ -1015,6 +1019,9 @@ def cmd_gc(a):
             log(f"rehearsal {n} is past its TTL ({rh.data['settings']['ttl']}): destroying it")
             rh.lock("gc")
             destroy(rh, a)
+            from . import alerts
+            alerts.send("rehearsal-expired", f"rehearsal {n} destroyed at the end of its TTL "
+                        f"({rh.data['settings']['ttl']})", rehearsal=n)
 
 
 def cmd_rehearse(a):

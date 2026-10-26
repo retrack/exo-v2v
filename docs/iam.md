@@ -1,6 +1,6 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.

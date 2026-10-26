@@ -30,6 +30,7 @@ nav:
       - Receiver templates: receiver-templates.md
   - Set up and run:
       - Prerequisites: prerequisites.md
+      - vCenter: vcenter.md
       - IAM role: iam.md
       - Operations runbook: OPERATIONS.md
       - Moving an application: groups.md
@@ -39,6 +40,7 @@ nav:
       - Supported operating systems: supported-os.md
       - Limitations: limitations.md
       - Architecture: ARCHITECTURE.md
+      - Project status: status.md
 
 exclude_docs: |
   diagrams/generate.py

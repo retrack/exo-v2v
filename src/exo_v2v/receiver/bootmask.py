@@ -10,8 +10,10 @@ change tracking). The conversion writes the side files to the disk first
 
 mask.json, next to the agent (written by exo-v2v): {"sda": [[offset, length], ...]}
 """
+import contextlib
 import json
 import os
+import subprocess
 
 MASK_DIR = os.environ.get("V2V_MASK_DIR", "/run/exo-v2v/mask")
 UNMASKED = "unmasked"        # flag file: the side files are on the disk, masking is over
@@ -138,6 +140,51 @@ def reader(export, ranges, dev_fd, mask_dir=MASK_DIR):
             not all(os.path.exists(side_path(mask_dir, export, off)) for off, _n in ranges):
         return None
     return Mask(export, ranges, dev_fd, mask_dir, create=False)
+
+
+@contextlib.contextmanager
+def view(export, ranges, dev, mask_dir=MASK_DIR):
+    """A read-only block device showing `dev` with its masked ranges put back
+    (device-mapper over the disk and loop devices of the side files), for tools
+    that read a device by path (the preflight's partition and LVM analysis).
+    Yields `dev` itself when nothing is masked, None when the view cannot be
+    built (no dmsetup)."""
+    if not ranges or not active(mask_dir) or \
+            not all(os.path.exists(side_path(mask_dir, export, off)) for off, _n in ranges):
+        yield dev
+        return
+    fd = os.open(dev, os.O_RDONLY)
+    size = os.lseek(fd, 0, os.SEEK_END)
+    m = Mask(export, ranges, fd, mask_dir, create=False)
+    loops, name = {}, f"v2v-view-{export}-{os.getpid()}"
+    try:
+        lines = []
+        for s, e, sfd in m.segments(0, size):
+            if sfd is None:
+                lines.append(f"{s // 512} {(e - s) // 512} linear {dev} {s // 512}")
+            else:
+                base = m._base(sfd)
+                if base not in loops:
+                    loops[base] = subprocess.run(["losetup", "-f", "--show", "-r", side_path(mask_dir, export, base)],
+                                                 capture_output=True, text=True, check=True).stdout.strip()
+                lines.append(f"{s // 512} {(e - s) // 512} linear {loops[base]} {(s - base) // 512}")
+        subprocess.run(["dmsetup", "create", name, "--readonly"], input="\n".join(lines) + "\n",
+                       capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        for lp in loops.values():
+            subprocess.call(["losetup", "-d", lp])
+        m.close()
+        os.close(fd)
+        yield None
+        return
+    try:
+        yield f"/dev/mapper/{name}"
+    finally:
+        subprocess.call(["dmsetup", "remove", name])
+        for lp in loops.values():
+            subprocess.call(["losetup", "-d", lp])
+        m.close()
+        os.close(fd)
 
 
 def unmask(exports, cfg, mask_dir=MASK_DIR):

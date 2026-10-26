@@ -1,6 +1,6 @@
 # exo-v2v
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied; it is stopped only
@@ -33,6 +33,8 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs |
 | **Rehearsal** | Copies of the VMs started from their replicas, converted as at cutover, [**airgapped**](rehearsal.md) (no public IP, isolated networks, no router) and reachable only by SSH through a relay; health checks, a predicted cutover window, the outside names the copies tried to resolve; the sources and replication carry on |
 | Status page | A read-only [web page](web.md) on the appliance with every migration and group |
+| vCenter | VMs by name, inventory path or UUID; groups from a [folder or a tag](vcenter.md); `plan` checks the account's privileges, the appliance's datastores and DRS |
+| Unattended | Replication on systemd timers, [webhook alerts](OPERATIONS.md#unattended-timers-and-alerts) (failing or lagging replication, a target that restarted, cutovers); a target that restarts boots nothing and is recovered with one command |
 | Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](limitations.md)) |
 
 ## Where to start
@@ -41,6 +43,7 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 |---|---|
 | [How it works](concepts.md) | The replication appliance, sync cycles, cutover, guest adaptation, security model |
 | [Prerequisites](prerequisites.md) | vSphere privileges, the appliance, network flows, Exoscale account |
+| [vCenter](vcenter.md) | The role, folders and tags, where the appliance runs, DRS |
 | [IAM role](iam.md) | A least-privilege Exoscale role for the appliance's API key |
 | [Receiver templates](receiver-templates.md) | Templates that boot straight into the receiver, and the Packer recipe that builds them |
 | [Moving an application](groups.md) | Groups: the manifest, private networks, the coordinated cutover, rollback |
@@ -50,6 +53,7 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | [Supported operating systems](supported-os.md) | Tested and expected-to-work guests, measured downtime |
 | [Limitations](limitations.md) | Known limits and their workarounds |
 | [Architecture](ARCHITECTURE.md) | Design details for contributors |
+| [Project status](status.md) | What is tested, and what it takes to drop the "Experimental" label |
 
 ## Install
 
@@ -57,7 +61,7 @@ On the replication appliance (a Linux VM in the same vSphere environment, with
 Python 3.10 or later and the [`exo` CLI](https://github.com/exoscale/cli)):
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.1/exo_v2v-0.4.1-py3-none-any.whl
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.5.0/exo_v2v-0.5.0-py3-none-any.whl
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```

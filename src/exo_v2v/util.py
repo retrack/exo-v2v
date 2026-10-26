@@ -25,7 +25,11 @@ def log_prefix(prefix):
         _ctx.prefix = old
 
 
+LAST_ERROR = {"msg": None}       # what die() said last: alerts quote it
+
+
 def die(msg, code=1):
+    LAST_ERROR["msg"] = str(msg)
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(code)
 

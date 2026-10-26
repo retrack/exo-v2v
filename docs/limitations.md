@@ -1,8 +1,8 @@
 # Limitations
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
-Known limits of exo-v2v 0.4.1. `exo-v2v plan` reports the ones it can detect
+Known limits of exo-v2v 0.5.0. `exo-v2v plan` reports the ones it can detect
 before anything is created.
 
 ## Source VM
@@ -41,12 +41,13 @@ exo-v2v adapts data volumes at cutover, with these limits:
 | Limit | Details |
 |---|---|
 | The appliance must run in the source vSphere | It reads snapshot disks by attaching them to itself, so it must be on a host that sees the VM's datastores. |
-| Copy speed | Limited by the datastore and the appliance's CPU. In our lab (HDD datastore, 2 vCPU appliance) a full copy ran at about 30 MiB/s per VM. Later cycles copy only changes. |
+| Copy speed | Limited by the datastore and the appliance's CPU. In our lab (HDD datastore) a full copy ran at 7–38 MiB/s per VM, about 60 MiB/s for a 4 vCPU appliance copying 5 VMs at once ([sizing](OPERATIONS.md#1-replication-appliance-once-per-vsphere-environment)). Later cycles copy only changes. |
 | Snapshot per cycle | Each cycle creates and removes a snapshot, which briefly pauses the VM, as backups do |
 | Target instance restarts during replication | The target instance runs its agent from memory and keeps the boot sectors of the system disk off the disk until the conversion: if it restarts, nothing boots. Run `exo-v2v recover NAME`: the next sync copies the system disk again, and the volumes only for their changes. |
 | Egress of the target instance | None until the cutover (receiver templates): its security group gets a rule that matches nothing. The cutover removes it before it stops the source; the IAM role needs `delete-rule-from-security-group` (0.4.1). |
 | Instance type during replication | The target instance runs as `standard.large` or larger until the cutover, then is scaled to its final type |
 | Datastore types | Tested on VMFS. vSAN and vVols are untested. |
+| vCenter | Tested against govmomi's vCenter simulator only: vMotion, Storage vMotion and DRS moves during a replication, and privilege enforcement, are untested on a real vCenter ([vCenter](vcenter.md)). The appliance's host must mount every datastore of the VMs it replicates |
 
 ## Cutover and after
 
@@ -63,7 +64,7 @@ exo-v2v adapts data volumes at cutover, with these limits:
 | Limit | Details |
 |---|---|
 | One appliance per group | It replicates every member, so it must see all their datastores |
-| Members by name | `group discover --vm`; selecting by vCenter folder or tag is not available yet |
+| Selecting members | `group discover --vm` (name or inventory path), `--folder`, `--tag` (vCenter): see [vCenter](vcenter.md) |
 | One zone | Every member of a group goes to the same zone |
 | Private networks | Managed private networks only (no VPC subnets). The top host address of the subnet (`.254` of a /24) belongs to Exoscale's DHCP server: a VM using it must be renumbered. The appliance role only attaches `v2v-*` private networks |
 | Default route | Moves to the public interface: a private network has no router. Routes to other networks through the old gateway are lost |

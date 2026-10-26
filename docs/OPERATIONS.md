@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -15,10 +15,27 @@ serve several migrations; hot-adds are serialized on it):
   configured with an API key limited to the **compute** service.
 - Run `sync`/`cutover` as root (`sudo -E`, so `VSPHERE_*` / `EXOSCALE_*` pass).
 
+Sizing, measured in our lab (VMFS on hard disks, the appliance with 4 vCPU and
+8 GiB RAM, a group of 10 VMs with 55 GB of data on 18 disks, 5 in parallel):
+
+| | Measured |
+|---|---|
+| `group create` (10 targets from receiver templates) | 3 min 26 s |
+| First full copy, 5 VMs at a time | 15 min 6 s: 62 MiB/s for the appliance, 7–38 MiB/s per VM (more for large contiguous data) |
+| Appliance CPU during the full copy | 40 % on average (plus 14 % I/O wait), peaks at 100 % |
+| A delta round of the 10 VMs with no changes | 116 s (snapshot, change query and removal: 10–77 s per VM, longer with more disks) |
+| `group cutover` of the 10 VMs (3 tiers) | window 803 s: the sources off in 3 min, 8 VMs converted 5 min later; one VM's three XFS-512 volume rebuilds set the end |
+
+The datastore set the pace here; on faster storage the appliance's CPU does
+(the copy reads, compares zeros and encrypts). Plan 2 vCPU for one or two
+concurrent copies, 4 vCPU for about five; `group sync` runs `sync.parallel` at
+a time (default 4).
+
 vSphere permissions for the migration account: on the source VMs
 `VirtualMachine.State.CreateSnapshot/RemoveSnapshot`, `VirtualMachine.Config.ChangeTracking`,
 `VirtualMachine.Interact.PowerOff/PowerOn` (cutover/rollback), `VirtualMachine.Provisioning.DiskRandomRead`;
 on the appliance VM `VirtualMachine.Config.AddExistingDisk/RemoveDisk`; `Datastore.FileManagement` (read).
+On a vCenter, see [vCenter](vcenter.md) for the role, where the appliance runs, and DRS.
 
 ## 2. A migration, end to end
 
@@ -27,7 +44,7 @@ on the appliance VM `VirtualMachine.Config.AddExistingDisk/RemoveDisk`; `Datasto
 | Plan | `exo-v2v plan NAME --vm VM --zone Z [--instance-type T] [--security-group SG] [--receiver-template TPL]` | seconds | untouched |
 | Receiver | `exo-v2v create NAME` | ~1 min with a [receiver template](receiver-templates.md), 5–15 min without | untouched |
 | Initial copy | `sudo -E exo-v2v sync NAME` | allocated data / throughput | running (snapshot during the cycle) |
-| Keep fresh | `sudo -E exo-v2v sync NAME --every 900` | per cycle: changes since last cycle | running |
+| Keep fresh | `sudo -E exo-v2v service install NAME --every 1h` (a timer, below), or `sudo -E exo-v2v sync NAME --every 900` in a terminal | per cycle: changes since last cycle | running |
 | Cutover | `sudo -E exo-v2v cutover NAME` | final delta + convert (2–5 min) + relayout (if any) + boot | **shut down** |
 | Validate | test the application on the instance | | off |
 | Finish | `exo-v2v cleanup NAME [--delete-rollback-volumes]` | | off (keep it until you are sure) |
@@ -41,7 +58,7 @@ before the cutover so that the final delta is small.
 
 | Step | Command | Source VMs |
 |---|---|---|
-| Draft | `exo-v2v group discover NAME --vm A --vm B ... --zone Z` then edit `NAME.yaml` | untouched |
+| Draft | `exo-v2v group discover NAME --vm A --vm B ... --zone Z` (or `--folder DC/vm/FOLDER`, `--tag CATEGORY:TAG` on a [vCenter](vcenter.md)) then edit `NAME.yaml` | untouched |
 | Plan | `exo-v2v group plan NAME -f NAME.yaml` | untouched |
 | Networks + receivers | `exo-v2v group create NAME` | untouched |
 | Copy and keep fresh | `sudo -E exo-v2v group sync NAME [--every 900]` | running |
@@ -60,7 +77,49 @@ check that `group sync` ran recently (`cutover.max_sync_age`).
 | Start | `sudo -E exo-v2v group rehearse NAME` (or `exo-v2v rehearse MIGRATION --tcp 22`) |
 | Look | `exo-v2v rehearsal connect NAME` (SSH config through the relay), `--forward VM:PORT` |
 | Report | `exo-v2v rehearsal report NAME`: times, predicted window, names the copies tried to resolve |
-| Throw away | `exo-v2v rehearsal destroy NAME` (or `exo-v2v gc` from cron after the TTL) |
+| Throw away | `exo-v2v rehearsal destroy NAME` (or `exo-v2v watch`, below, after the TTL) |
+
+### Unattended: timers and alerts
+
+Replication runs for days; the appliance can run it without a terminal and
+call for a person when something needs one.
+
+```bash
+sudo -E exo-v2v service install web01 --every 1h --write-env   # a cycle every hour (systemd timer)
+sudo -E exo-v2v service install --group shop --every 1h
+sudo -E exo-v2v service install --watch                          # every 15 min: lag alerts, expired rehearsals
+exo-v2v service list
+sudo exo-v2v service remove web01
+```
+
+A timer starts the next cycle `--every` after the previous one ended, so cycles
+never overlap. The units run as root with the variables of
+`/etc/exo-v2v/exo-v2v.env` (`--write-env` writes it, mode 600, from the current
+`VSPHERE_*` and `EXOSCALE_*`); the `exo` CLI found in your `PATH` at install time
+is the one they use. A cutover removes the timers of what it moves once the
+sources stop; `cleanup` too.
+
+Alerts go to a webhook, set in `$EXO_V2V_HOME/config.yaml` (`/var/lib/exo-v2v`
+or `~/.exo-v2v`):
+
+```yaml
+alerts:
+  webhook: https://hooks.slack.com/services/T000/B000/XXXX   # Slack, Mattermost, Teams: JSON with "text"
+  lag: 4h          # a syncing migration whose last good cycle is older
+  failures: 2      # failed cycles in a row
+```
+
+| Event | When |
+|---|---|
+| `sync-failing` / `sync-recovered` | `failures` cycles failed in a row (with the last error) / the next good cycle |
+| `lag` / `lag-recovered` | `exo-v2v watch` finds a migration whose last good cycle is older than `lag` / it caught up |
+| `receiver-down` | `sync` finds the receiver stopped, restarted or booted from its disk (once per outage) |
+| `cutover-done` / `cutover-failed` | a cutover or group cutover finished / stopped |
+| `rehearsal-expired` | `watch` destroyed a rehearsal at the end of its TTL |
+
+`exo-v2v alert test` sends a test message. Without a webhook, alerts are only
+logged. `status` and the [web page](web.md) show failed cycles, the last error
+and a lag over the threshold.
 
 ## 3. Rollback
 

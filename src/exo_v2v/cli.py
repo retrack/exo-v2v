@@ -30,11 +30,13 @@ import time
 import urllib.request
 
 from . import __version__
+from . import alerts, service
 from . import plan as planmod
 from . import userdata
 from .exo import Exo, ExoError, volume_size_gb
 from .state import State
 from .tunnel import Tunnel
+from . import util
 from .util import die, gib_ceil, human, log
 
 LABEL = "exo-v2v"
@@ -86,7 +88,10 @@ def mapping_of(st):
 
 
 def print_plan(p):
-    print(f"VM {p['vm']}: {p['os_family']} ({p['guest_id']}), firmware {p['firmware']}")
+    inv = p.get("inventory") or {}
+    where = f" on {inv['server']['product']}" if inv.get("server") else ""
+    path = f" [{inv['path']}]" if inv.get("path") and inv["path"].rsplit("/", 1)[-1] != inv["path"] else ""
+    print(f"VM {p['vm']}{path}: {p['os_family']} ({p['guest_id']}), firmware {p['firmware']}{where}")
     print(f"  receiver: {p['template']} as {p['convert_type']} -> final {p['target_type']} in {p['zone']}")
     for d in p["disks"]:
         where = (f"inside the root disk at {human(d['offset'])}" if d["role"] == "fold"
@@ -100,10 +105,26 @@ def print_plan(p):
 
 # ---------------- commands ----------------
 
+def vsphere_warnings(V, vc, vm):
+    """What the vSphere side will refuse later: missing privileges of the
+    account, an appliance host that cannot see the VM's datastores, DRS."""
+    out = []
+    proxy = V.self_vm(vc) if os.geteuid() == 0 else None      # plan run on the appliance, as root
+    missing = V.missing_privileges(vc, vm, proxy)
+    if missing:
+        out.append("vSphere account lacks " + "; ".join(missing) + " (see docs/prerequisites.md)")
+    if proxy is not None:
+        errs, warns = V.appliance_checks(vc, vm, proxy)
+        out += errs + warns
+    return out
+
+
 def cmd_plan(a):
     V, vc = vsphere_connect(a)
     try:
-        inv = V.inventory(vc, vc.vm(a.vm))
+        vm = vc.vm(a.vm)
+        inv = V.inventory(vc, vm)
+        vwarn = vsphere_warnings(V, vc, vm)
     finally:
         vc.close()
     boot_mode = None
@@ -117,6 +138,7 @@ def cmd_plan(a):
                       a.receiver_template, a.receiver_template_visibility, boot_mode,
                       fold=a.fold or [], auto_fold=not a.no_fold)
     p["inventory"] = inv
+    p["warnings"] += vwarn
     print_plan(p)
     if p["errors"] and not a.force:
         die("plan has errors (fix them, or --force to record the plan anyway)")
@@ -248,13 +270,15 @@ def agent_payload(st):
                                 userdata.boot_mask(st["plan"]))
 
 
-def upgrade_agent(st, t):
-    """A receiver whose agent predates the boot mask (exo-v2v < 0.4.1) gets the
-    current agent in place: same boot, same disks, so its change IDs are kept;
-    the new agent masks the boot sectors it finds on the disk."""
+def upgrade_agent(st, t, old=None):
+    """A receiver whose agent is another version than the appliance's gets the
+    current agent in place, between two cycles: same boot, same disks, so its
+    change IDs are kept. An agent older than the boot mask (exo-v2v < 0.4.1)
+    then masks the boot sectors it finds on the disk."""
     exports = sorted(set(mapping_of(st).values()))
     saved = {e: t.get(f"/meta?export={e}") for e in exports}
-    log("receiver agent predates the boot mask (exo-v2v < 0.4.1): upgrading it in place (change IDs kept)")
+    log(f"receiver agent {old or 'older than 0.4.1 (no boot mask)'} -> {__version__}: upgrading it in place "
+        "(change IDs kept)")
     cmd = userdata.agent_start_command(1 + len(st["receiver"]["volumes"]))
     r = subprocess.run(t.ssh_base() + [f"{t.user}@{t.host}", "sudo sh -c " + repr(cmd)],
                        input=agent_payload(st), capture_output=True, timeout=600)
@@ -264,7 +288,7 @@ def upgrade_agent(st, t):
     for _ in range(90):
         try:
             status = t.get("/status", timeout=5)
-            if "mask" in status:
+            if status.get("version") == __version__:
                 break
         except OSError:
             pass
@@ -275,7 +299,7 @@ def upgrade_agent(st, t):
         if m.get("change_id"):
             t.post(f"/meta?export={e}", m)
     st.data["receiver"]["agent_started"] = time.time() - status.get("uptime_s", 0)
-    st.event("receiver agent upgraded in place (boot mask on)")
+    st.event(f"receiver agent upgraded in place to {__version__}")
     st.save()
     return status
 
@@ -338,10 +362,16 @@ def receiver_down(st, ex, err):
     except ExoError as e:
         die(f"receiver {r['name']} unreachable ({err}); Exoscale: {e}")
     rec = f"`exo-v2v recover {st.name}`"
+    known_down = bool(r.get("down"))                # already reported: `recover` clears it
+
+    def down(msg):                                  # the receiver needs a person: alert (once), then stop
+        if not known_down:
+            alerts.send("receiver-down", f"{st.name}: {msg}", migration=st.name, group=st.data.get("group"))
+        die(msg)
     if state != "running":
         r["down"] = {"t": time.time(), "state": state, "trust_volumes": True}
         st.save()
-        die(f"receiver {r['name']} is {state}. Its agent ran from RAM: {rec} resets its root disk "
+        down(f"receiver {r['name']} is {state}. Its agent ran from RAM: {rec} resets its root disk "
             "(copied again at the next sync) and keeps the volumes' copies")
     key = host_key(r["ip"])
     kh = os.path.join(st.dir, "known_hosts")
@@ -357,16 +387,16 @@ def receiver_down(st, ex, err):
             stopped = "exo-v2v stopped it: a copy of the source must not run next to the source."
         except ExoError as e:
             stopped = f"STOP IT NOW (exo compute instance stop {r['name']}): {e}"
-        die(f"receiver {r['name']} restarted and booted the copy of the source VM on its disk "
+        down(f"receiver {r['name']} restarted and booted the copy of the source VM on its disk "
             f"(receivers created before exo-v2v 0.4.1 have no boot mask). {stopped} {rec} resets its "
             "root disk; the volumes are copied again in full (the copy may have written to them)")
     if not key:
         r["down"] = {"t": time.time(), "state": "no SSH", "trust_volumes": True}
         st.save()
-        die(f"receiver {r['name']} is running but does not answer on SSH: it most likely restarted "
+        down(f"receiver {r['name']} is running but does not answer on SSH: it most likely restarted "
             f"(with the boot mask, nothing boots). {rec} resets its root disk (copied again at the next "
             f"sync) and keeps the volumes' copies. ({err})")
-    die(f"receiver {r['name']} answers on SSH but its agent is unreachable: {err}")
+    down(f"receiver {r['name']} answers on SSH but its agent is unreachable: {err}")
 
 
 @contextlib.contextmanager
@@ -640,8 +670,8 @@ def run_cycle(st, a, V, vc, vm, proxy, t, full=False, final=False):
     status = t.get("/status")
     if not status.get("ramroot"):
         die("receiver is not in its RAM root any more (it rebooted from disk?): recreate it (exo-v2v cleanup --delete-instance; create)")
-    if "mask" not in status and not final:
-        status = upgrade_agent(st, t)
+    if status.get("version") != __version__ and not final:
+        status = upgrade_agent(st, t, status.get("version"))
     check_receiver_continuity(st, t, status)
     cyc = V.sync(vc, vm, mapping_of(st), t.nbd, t.api, full=full, final=final,
                  shutdown_timeout=a.shutdown_timeout, workers=a.workers, transport=a.transport, proxy=proxy)
@@ -671,7 +701,7 @@ def migration_lock(st, what):
 def sender_context(a, st, what):
     migration_lock(st, what)
     V, vc = vsphere_connect(a)
-    vm = vc.vm(st["plan"]["vm"])
+    vm = vc.vm_of(st["plan"])
     proxy = None
     if a.transport == "hotadd":
         if os.geteuid() != 0:
@@ -679,6 +709,11 @@ def sender_context(a, st, what):
         proxy = vc.vm(a.proxy_vm) if a.proxy_vm else V.self_vm(vc)
         if proxy is None:
             die("cannot identify the appliance VM by SMBIOS UUID: pass --proxy-vm NAME")
+        errs, warns = V.appliance_checks(vc, vm, proxy)     # the VM may have moved since the last cycle
+        if errs:
+            die("; ".join(errs))
+        for w in warns:
+            log(f"WARNING {w}")
     for msg in V.sweep(vc, vm, proxy):
         log(f"cleanup: {msg}")
     if not vm.config.changeTrackingEnabled or not all(V.disk_ctk(vm).values()):
@@ -688,7 +723,20 @@ def sender_context(a, st, what):
 
 
 def cmd_sync(a):
-    st = State.load(a.name)
+    """A cycle (or --every: cycles until Ctrl-C). Failed cycles are counted and,
+    past alerts.failures in a row, alerted (alerts.py); a busy lock is not a failure."""
+    try:
+        sync_loop(a, State.load(a.name))
+    except SystemExit as e:
+        if e.code and not (util.LAST_ERROR["msg"] or "").startswith("another exo-v2v"):
+            alerts.sync_failed(State.load(a.name))
+        raise
+    except Exception as e:
+        alerts.sync_failed(State.load(a.name), repr(e))
+        raise
+
+
+def sync_loop(a, st):
     if st["phase"] not in ("receiver-ready", "syncing"):
         die(f"phase is {st['phase']}: sync needs a ready receiver")
     V, vc, vm, proxy = sender_context(a, st, "sync")
@@ -706,6 +754,7 @@ def cmd_sync(a):
                 n += 1
                 log(f"cycle {len(st['cycles'])}: {sum(d['covered'] for d in cyc['disks'].values()) / 2**20:.0f} MiB "
                     f"in {cyc['seconds']}s")
+                alerts.sync_ok(st)
                 if n == 1 or changed:
                     preflight_report(st, t)
             if not a.every or stop["now"] or (a.cycles and n >= a.cycles):
@@ -847,6 +896,15 @@ def convert(st, ex, t, extra=None):
 
 
 def cmd_cutover(a):
+    try:
+        cutover(a)
+    except SystemExit as e:
+        if e.code and not a.in_group and not (util.LAST_ERROR["msg"] or "").startswith("another exo-v2v"):
+            alerts.send("cutover-failed", f"{a.name}: cutover stopped: {util.LAST_ERROR['msg']}", migration=a.name)
+        raise
+
+
+def cutover(a):
     st = State.load(a.name)
     group_guard(st, a, "cutover")
     from .rehearsal import active_for
@@ -865,6 +923,7 @@ def cmd_cutover(a):
             with receiver(st, ex) as t:
                 if "source_off" not in steps:
                     open_egress(st, ex)
+                    service.stop_for(migration=st.name)   # no timed cycles once the source stops
                 if st["phase"] != "cutover":
                     st.set_phase("cutover")
                 if "final_cycle" not in steps:
@@ -900,6 +959,9 @@ def cmd_cutover(a):
     port = 3389 if st["plan"]["os_family"] == "windows" else 22
     print(f"cutover {'complete' if up else 'finished, but port %d not reachable yet' % port}: "
           f"{r['name']} {r['ip']} — downtime {st['downtime_s']}s (source shutdown -> port {port} open)")
+    if not a.in_group:
+        alerts.send("cutover-done", f"{st.name}: cut over to {r['name']} ({r['ip']}), downtime {st['downtime_s']}s"
+                    + ("" if up else f", port {port} not reachable yet"), migration=st.name)
     if port == 3389:
         print("note: Windows keeps installing drivers for a few minutes (it may reboot); data disks "
               "come online when that finishes (C:\\Program Files\\Guestfs\\Firstboot\\log.txt)")
@@ -975,13 +1037,16 @@ def cmd_status(a):
         print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}) in {p['zone']}  phase={st['phase']}{grp}")
         if last:
             age = int(time.time() - last["t"])
-            print(f"  cycles={len(st['cycles'])} last={age}s ago "
-                  f"({', '.join(f'{k}:{v['mode']} {human(v['covered'])}' for k, v in last['disks'].items())})")
+            disks = ", ".join(f"{k}:{v['mode']} {human(v['covered'])}" for k, v in last["disks"].items())
+            print(f"  cycles={len(st['cycles'])} last={age}s ago ({disks})")
         if "downtime_s" in st.data:
             print(f"  downtime {st['downtime_s']}s")
         if r.get("down"):
             print(f"  RECEIVER DOWN ({r['down']['state']}, {int(time.time() - r['down']['t'])}s ago): "
                   f"exo-v2v recover {n}")
+        sy = st.data.get("sync") or {}
+        if sy.get("failures"):
+            print(f"  {sy['failures']} failed cycle(s) in a row; last error: {sy.get('last_error')}")
         if a.verbose:
             print_plan(p)
 
@@ -998,7 +1063,7 @@ def rollback(st, a, V, vc, wait_tools=0):
         if ex.instance(r["name"]).get("state") != "stopped":
             ex.instance_stop(r["name"])
         log(f"{st.name}: instance {r['name']} stopped (delete it with cleanup --delete-instance)")
-    vm = vc.vm(st["plan"]["vm"])
+    vm = vc.vm_of(st["plan"])
     waited = V.power_on(vm, wait_tools) if wait_tools else None
     if not wait_tools and str(vm.runtime.powerState) != "poweredOn":
         V.WaitForTask(vm.PowerOnVM_Task())
@@ -1027,6 +1092,7 @@ def cmd_cleanup(a):
 
 
 def cleanup(st, a):
+    service.stop_for(migration=st.name)
     ex = exo_for(st, a)
     r = st["receiver"]
     if a.delete_instance and r.get("name") and ex.instance_exists(r["name"]):
@@ -1130,6 +1196,8 @@ def main(argv=None):
     group.add_parser(sub)
     rehearsal.add_parser(sub)
     web.add_parser(sub)
+    service.add_parser(sub)
+    alerts.add_parser(sub)
 
     a = ap.parse_args(argv)
     try:

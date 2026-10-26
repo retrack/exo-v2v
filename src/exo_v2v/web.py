@@ -62,6 +62,7 @@ def summary(st):
         "errors": len(p.get("errors", [])), "warnings": len(p.get("warnings", [])),
         "busy": _lock(os.path.join(st.dir, ".lock")),
         "down": r.get("down"),          # the receiver stopped answering: `exo-v2v recover`
+        "sync": {k: (st.data.get("sync") or {}).get(k) for k in ("failures", "last_error", "last_ok")},
         "updated": os.path.getmtime(st.path),
     }
 
@@ -140,7 +141,13 @@ def overview():
         if st and not st.data.get("rehearsal_of"):         # copies show under their rehearsal
             migs.append(summary(st))
     rhs = [r for r in (rehearsal_doc(n) for n in Rehearsal.all()) if r and r["state"] != "destroyed"]
+    try:
+        from .alerts import config
+        lag = config()["lag_s"]
+    except SystemExit:                # a broken config.yaml must not take the page down
+        lag = None
     return {"host": socket.gethostname(), "version": __version__, "now": time.time(), "home": home(),
+            "lag_alert_s": lag,
             "groups": [g for g in (group_doc(n) for n in Group.all()) if g], "migrations": migs,
             "rehearsals": rhs}
 
