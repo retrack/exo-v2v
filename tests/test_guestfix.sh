@@ -101,7 +101,9 @@ sudo mount -t ntfs3 -o ro "${l}p1" "$W/m" 2>/dev/null && { sudo umount "$W/m"; e
 sudo python3 -I "$HERE/guestfix.py" adapt "$l" > "$W/nt.json"
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[0]; print("  action:", r["action"], "| ntfs:", [ (x["partition"], x["action"]) for x in r.get("ntfs",[])], "| compatible:", r["compatible"])' "$W/nt.json"
 sudo partprobe "$l" 2>/dev/null; sleep 1
-if sudo mount -t ntfs3 -o ro "${l}p1" "$W/m"; then
+if ! grep -qw ntfs3 /proc/filesystems && ! sudo modprobe ntfs3 2>/dev/null; then
+  echo "  skip: this kernel has no ntfs3 (the strict mount check needs it)"
+elif sudo mount -t ntfs3 -o ro "${l}p1" "$W/m"; then
   got=$(sudo sh -c "cd $W/m && find . -type f -exec sha256sum {} + | sort" | sha256sum)
   [ "$got" = "$want" ] && ok "ntfs: mounts on 4Kn after BPB rewrite (kernel ntfs3), contents identical" || bad "ntfs: contents differ"
   sudo umount "$W/m"

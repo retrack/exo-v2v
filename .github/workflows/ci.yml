@@ -51,7 +51,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update -q && sudo apt-get install -y -q gdisk xfsprogs xfsdump lvm2 ntfs-3g parted dosfstools
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdisk xfsprogs xfsdump lvm2 ntfs-3g parted dosfstools attr
+      - name: ntfs3 (the kernel driver the NTFS check mounts with)
+        run: sudo apt-get install -y -q "linux-modules-extra-$(uname -r)" && sudo modprobe ntfs3 || echo "no ntfs3 on this runner"
       - run: bash tests/test_guestfix.sh
       - run: bash tests/test_lvm.sh
 
