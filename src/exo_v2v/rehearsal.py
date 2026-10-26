@@ -431,6 +431,25 @@ def make_shadow(rh, x, st, ex, timeout):
     return sh
 
 
+def seed_egress_desc(rh):
+    return f"exo-v2v: rehearsal {rh.name} relay"
+
+
+def seed_egress(rh, sts, ex):
+    """Production receivers whose egress is closed (exo-v2v >= 0.4.1) may open
+    SSH to the relay for the seed: the root disk stream goes that way. Exoscale
+    applies the rule within a minute or two; the stream retries until then."""
+    done = rh.data.setdefault("seed_egress", [])
+    for st in sts.values():
+        r = st["receiver"]
+        if st.name in done or not r.get("egress_closed") or not r.get("sg"):
+            continue
+        if not any(x.get("description") == seed_egress_desc(rh) for x in ex.sg_egress_rules(r["sg"])):
+            ex.sg_rule_add(r["sg"], f"{rh.data['relay']['ip']}/32", 22, desc=seed_egress_desc(rh), flow="egress")
+        done.append(st.name)
+        rh.save()
+
+
 def stream_root(rh, st, sh, port):
     """The production receiver copies its root disk (the replica) onto the
     copy's receiver: NBD through an SSH tunnel via the relay."""
@@ -440,8 +459,12 @@ def stream_root(rh, st, sh, port):
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for arc, path in (("relay_key", rh.key_path), ("shadow_key", sh.key_path),
                           ("rootcopy.py", os.path.join(here, "rootcopy.py")),
+                          ("bootmask.py", os.path.join(here, "bootmask.py")),
                           ("nbdproto.py", os.path.join(here, "nbdproto.py"))):
             tar.add(path, arcname=arc)
+    # read through the production receiver's boot mask (exo-v2v >= 0.4.1): the copy gets
+    # the real boot sectors; without a mask (an older agent) rootcopy reads the disk as it is
+    root = next(iter(userdata.boot_mask(st["plan"])), "sda")
     b64 = base64.b64encode(buf.getvalue()).decode()
     d = f"/run/v2v-rh-{sh.name}"
     o = (f"-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
@@ -454,8 +477,12 @@ base64 -d > $D/p.tgz <<'V2V_B64'
 V2V_B64
 tar -xzf $D/p.tgz -C $D; chmod 600 $D/relay_key $D/shadow_key
 trap 'pkill -f "{fwd}" || true; rm -rf $D' EXIT
-ssh -i $D/shadow_key {o} -o ExitOnForwardFailure=yes -o "ProxyCommand=ssh -i $D/relay_key {o} -W %h:%p debian@{rh.data['relay']['ip']}" -f -N -L {fwd} v2v@{sh['receiver']['ip']}
-python3 $D/rootcopy.py /dev/vda 127.0.0.1:{port} sda 4
+# the egress rule towards the relay may take a minute or two to apply (Exoscale)
+for i in $(seq 1 16); do
+  ssh -i $D/shadow_key {o} -o ConnectTimeout=15 -o ExitOnForwardFailure=yes -o "ProxyCommand=ssh -i $D/relay_key {o} -o ConnectTimeout=15 -W %h:%p debian@{rh.data['relay']['ip']}" -f -N -L {fwd} v2v@{sh['receiver']['ip']} && break
+  [ $i = 16 ] && exit 1; sleep 10
+done
+python3 $D/rootcopy.py /dev/vda 127.0.0.1:{port} sda 4 --overlay {root} --mask-config /opt/v2v-agent/mask.json
 """
     t = tunnel_for(st)
     p = t.ssh("sudo bash -s", input=script, timeout=12 * 3600)
@@ -700,6 +727,7 @@ def rehearse(name, members, settings, zone, a):
             create_relay(rh, ex, sender, a.timeout)
             rh.event(f"relay {rh.data['relay']['name']} at {rh.data['relay']['ip']} (SSH only, no forwarding)")
             rh.mark("relay")
+        seed_egress(rh, sts, ex)
         if "shadows" not in steps:
             res = parallel(lambda m: make_shadow(rh, m, sts[m["vm"]], ex, a.timeout), members)
             bad = {k: v for k, v in res.items() if v}
@@ -949,6 +977,16 @@ def destroy(rh, a):
                 break
             except ExoError:
                 time.sleep(10)
+    for mig in rh.data.get("seed_egress", []):
+        st = State.load(mig) if os.path.exists(os.path.join(home(), mig, "state.json")) else None
+        sg = st and st["receiver"].get("sg")
+        try:
+            for x in (ex.sg_egress_rules(sg) if sg else []):
+                if x.get("description") == seed_egress_desc(rh):
+                    ex.sg_rule_delete(sg, x["id"])
+                    log(f"{mig}: egress to the relay closed again")
+        except ExoError as e:
+            log(f"{mig}: egress rule to the relay left in {sg} (harmless; gone at cleanup): {e}")
     sg = rh.data.get("relay", {}).get("sg")
     if sg and ex.exists("sg", sg):
         for i in range(12):

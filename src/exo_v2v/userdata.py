@@ -7,15 +7,30 @@ import json
 import os
 import tarfile
 
-PAYLOAD_FILES = ["agent.py", "guestfix.py", "lvmlayout.py", "nbdserve.py", "nbdproto.py", "cbtsim.py",
-                 "rootcopy.py", "bootstrap-kexec.sh", "win-support.sh"]
+from . import __version__
+
+PAYLOAD_FILES = ["agent.py", "bootmask.py", "guestfix.py", "lvmlayout.py", "nbdserve.py", "nbdproto.py",
+                 "cbtsim.py", "rootcopy.py", "bootstrap-kexec.sh", "win-support.sh"]
 RECEIVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "receiver")
+MiB = 1 << 20
 
 
-def payload_b64(folds=(), volumes=None):
+def boot_mask(plan):
+    """{"sda": [[offset, length]]}: the first and the last MiB of the system disk
+    (MBR/GPT and boot loader, backup GPT), kept off the receiver's disk until the
+    conversion (receiver/bootmask.py)."""
+    root = next((d for d in plan.get("disks", []) if d.get("role") == "root"), None)
+    if not root or not root.get("capacity"):
+        return {}
+    cap = root["capacity"]
+    return {root["export"]: [[0, min(MiB, cap)]] + ([[cap - MiB, MiB]] if cap >= 2 * MiB else [])}
+
+
+def payload_b64(folds=(), volumes=None, masks=None):
     """The receiver payload. `folds` ([{"export", "offset", "size"}], disks
     replicated into regions of the system disk) goes along as folds.json,
-    `volumes` ({export: volume serial}) as volumes.json."""
+    `volumes` ({export: volume serial}) as volumes.json, `masks` (boot_mask)
+    as mask.json, and the exo-v2v version as version.json."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for f in PAYLOAD_FILES:
@@ -24,7 +39,8 @@ def payload_b64(folds=(), volumes=None):
             ti.uname = ti.gname = "root"
             with open(os.path.join(RECEIVER_DIR, f), "rb") as fh:
                 tar.addfile(ti, fh)
-        for name, obj in (("folds.json", list(folds)), ("volumes.json", volumes)):
+        for name, obj in (("folds.json", list(folds)), ("volumes.json", volumes), ("mask.json", masks),
+                          ("version.json", {"version": __version__})):
             if obj:
                 data = json.dumps(obj).encode()
                 ti = tarfile.TarInfo(name)
@@ -33,8 +49,8 @@ def payload_b64(folds=(), volumes=None):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def payload_tgz(folds=(), volumes=None):
-    return base64.b64decode(payload_b64(folds, volumes))
+def payload_tgz(folds=(), volumes=None, masks=None):
+    return base64.b64decode(payload_b64(folds, volumes, masks))
 
 
 def build(pubkey):

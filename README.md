@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -64,8 +64,8 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.0/exo_v2v-0.4.0-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.4.0   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.1/exo_v2v-0.4.1-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.4.1   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -157,9 +157,10 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
   and Storage Spaces disks are not supported as data disks (detected, left
   untouched, unreadable on Exoscale): convert them to basic disks first.
 - Disks may grow or be added during replication; a removed disk stops `sync`.
-- The receiver keeps the replica in its RAM-booted agent's state: if it reboots
-  during the sync window it must be recreated (`cleanup --delete-instance`, `create`)
-  and the next sync is a full copy.
+- If the receiver restarts during the sync window, nothing boots (its boot
+  sectors stay off the disk until the conversion) and `sync` says so:
+  `exo-v2v recover NAME` resets its root disk; the next sync copies the system
+  disk again and only the changes of the data volumes.
 
 The complete list is in [Limitations](docs/limitations.md). See the
 [operations runbook](docs/OPERATIONS.md) for troubleshooting.

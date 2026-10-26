@@ -1,6 +1,6 @@
 # Rehearsal
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A rehearsal starts **copies** of the migrated VMs on Exoscale, converted exactly
 as the cutover would convert them, so that you can check the application before
@@ -58,7 +58,7 @@ rehearsal:
 | The relay as a way out | The relay does not route: IP forwarding off, nftables `forward` policy drop, no NAT. Its sshd accepts keys only, and forwards (`ssh -L`, `-W`) only to the copies' addresses (`PermitOpen`); no tunnels, no gateway ports, no agent forwarding |
 | Who reaches the relay | Its security group: SSH from the appliance and the `access` addresses only |
 | DNS | The rehearsal networks hand out the relay as DNS server; it also answers on the on-premises DNS addresses the guests have configured, when they fall inside a rehearsal network. It answers the names in `hosts`, refuses everything else at once, and logs every query |
-| Replication | Untouched: the copies come from Block Storage snapshots of the replicas and from one read of each replica's root disk, while that migration's lock is held (minutes). The next sync is an ordinary delta |
+| Replication | Untouched: the copies come from Block Storage snapshots of the replicas and from one read of each replica's root disk (through its boot mask), while that migration's lock is held (minutes). The next sync is an ordinary delta. A production receiver, which allows no egress, may open SSH to the relay for that read; `destroy` closes it again |
 | The sources | Never touched: the copies come from Exoscale, not from vSphere |
 
 Before any copy boots its converted system, exo-v2v checks through the API that

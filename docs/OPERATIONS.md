@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -76,7 +76,11 @@ the sources on, back end first. Members that were not converted yet keep syncing
 | Symptom | Cause / action |
 |---|---|
 | `create` times out | Console of the instance in the portal; `/var/log/v2v-bootstrap.log` on it (apt mirror reachable? 2+ disks attached?). `cleanup --delete-instance` and `create` again. |
-| `receiver is not in its RAM root any more` | The receiver rebooted during the sync window and now runs a half-written disk. `cleanup --delete-instance`, `create`, then `sync` (full). |
+| `receiver … is running but does not answer on SSH` | The receiver restarted; with the boot mask (0.4.1 and later) nothing boots. `exo-v2v recover NAME`, then `sync`: the system disk is copied again, the volumes only for their changes. |
+| `receiver … restarted and booted the copy of the source VM on its disk` | A receiver created before 0.4.1 (no boot mask) restarted and booted its replica; `sync` stopped it. `exo-v2v recover NAME`, then `sync` (the volumes are copied in full: the copy may have written to them). |
+| `receiver … is stopped` | Someone stopped it. `exo-v2v recover NAME` (do not just start it: an instance created before 0.4.1 would boot its replica). |
+| `receiver is not in its RAM root any more` | The receiver booted a disk instead of its RAM root. `exo-v2v recover NAME`. |
+| `cannot reopen the egress of …` at cutover | The appliance's IAM role lacks `delete-rule-from-security-group` (added in 0.4.1): update it (`exo iam role update exo-v2v-appliance --policy - < docs/iam/exo-v2v-appliance-policy.json`) and run `cutover` again. Nothing was stopped. |
 | `Change tracking is not active on disk …` in logs | Per-disk CBT was off; that disk is copied whole once, CBT is enabled automatically for the next cycle. |
 | `hot-added … never appeared as a block device` | The appliance has no free SCSI unit or a non-paravirtual controller only; add a pvscsi controller to the appliance. |
 | `Another task is already in progress` | Handled (waits/retries). If persistent: a snapshot consolidation is running on the source; wait. |

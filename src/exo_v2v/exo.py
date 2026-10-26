@@ -34,7 +34,9 @@ class Exo:
             return {}
         r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
         if r.returncode and check:
-            raise ExoError(f"{' '.join(cmd[:4])}…: {(r.stderr or r.stdout).strip()[-400:]}")
+            out = (r.stderr or r.stdout).strip()
+            errs = [ln for ln in out.splitlines() if ln.lower().startswith("error")]   # not the spinner lines
+            raise ExoError(f"{' '.join(cmd[:4])}…: {('; '.join(errs) if errs else out)[-400:]}")
         if not json_out:
             return r.stdout
         try:
@@ -231,10 +233,16 @@ class Exo:
     def sg(self, name):
         return self.run("compute", "security-group", "show", name)
 
-    def sg_rule_add(self, sg, cidr, port, proto="tcp", desc=""):
+    def sg_rule_add(self, sg, cidr, port, proto="tcp", desc="", flow="ingress"):
         return self.run("compute", "security-group", "rule", "add", sg, "--network", cidr,
                         "--protocol", proto, "--port", str(port), "--description", desc or "exo-v2v",
-                        json_out=False)
+                        "--flow", flow, json_out=False)
+
+    def sg_egress_rules(self, sg):
+        return self.sg(sg).get("egress_rules") or []
+
+    def sg_rule_delete(self, sg, rule_id):
+        return self.run("compute", "security-group", "rule", "delete", sg, rule_id, "-f", json_out=False)
 
     def sg_delete(self, name):
         return self.run("compute", "security-group", "delete", name, "-f", json_out=False)

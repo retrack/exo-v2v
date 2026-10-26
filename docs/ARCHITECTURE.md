@@ -1,6 +1,6 @@
 # exo-v2v architecture
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## Components
 
@@ -46,10 +46,33 @@ filesystem, packs it as an initramfs and `kexec`s into it with the same kernel.
 From then on nothing uses `/dev/vda` or the volumes: the agent exports them
 over NBD on `127.0.0.1` only.
 
-Consequence (documented limit): if the receiver reboots during the sync window,
-it boots the half-written disk. `exo-v2v` detects a receiver that left its RAM
-root and asks for recreation; a restarted agent (lost `/meta`) triggers a full
-cycle automatically.
+A receiver that restarts during the sync window must not boot the replica on
+its disk: that would be an unconverted copy of the source VM, running next to
+the source on the receiver's public IP, writing to its volumes behind the change
+tracking. Since 0.4.1:
+
+- **Boot mask.** The agent keeps the first and the last MiB of the system disk
+  (MBR or GPT, boot loader, backup GPT) off the disk: NBD writes there go to
+  side files in RAM (`/run/exo-v2v/mask`), reads return them, and the disk holds
+  zeros, so the firmware finds nothing to boot. The conversion writes the side
+  files to the disk first, once (a flag file stops a second conversion from
+  undoing what the first wrote). `/hashmap`, `cutover --verify` and the
+  rehearsal's root copy read through the mask. A receiver created by an older
+  version gets the new agent in place at its next `sync` (same boot, change IDs
+  kept); the mask then starts from the boot sectors on its disk.
+- **No egress.** A template receiver's security group gets one egress rule that
+  matches nothing (Exoscale turns egress into an allowlist at the first rule;
+  replies to the appliance's SSH are stateful; the metadata server stays
+  reachable). The cutover removes it before it stops the source; a rehearsal
+  allows SSH to its relay for the seed.
+- **Change IDs on the appliance.** After every cycle the appliance saves each
+  export's change ID with the receiver's boot ID and the mask state. An agent
+  that restarts in the same boot gets them back (no full cycle); `sync` tells a
+  receiver that stopped answering (restarted: nothing boots), stopped, or booted
+  its disk (a receiver without the mask: `sync` stops it) and points to
+  `exo-v2v recover`, which resets the root disk to the receiver template (stop,
+  detach the volumes, reset, start, reattach) and restores the volumes' change
+  IDs when the mask was on: only the system disk is copied again.
 
 ## Data path
 

@@ -30,8 +30,13 @@
 Folded disks (folds.json next to the agent: [{"export", "offset", "size"}]) are
 regions of the system disk exported through loop devices; at conversion their
 partitions are added to the system disk's table (guestfix.fold).
+
+Boot mask (mask.json, bootmask.py): the first and last MiB of the system disk
+stay off the disk until the conversion, so a receiver restarted mid-replication
+boots nothing. /hashmap and the rehearsal's root copy read through it.
 """
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -43,6 +48,7 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]  # flat on the receiver, tools/ in the kit
+import bootmask  # noqa: E402
 import cbtsim  # noqa: E402
 import guestfix  # noqa: E402
 
@@ -57,6 +63,46 @@ META = {}
 FOLDS_FILE = os.path.join(HERE, "folds.json")
 VOLUMES_FILE = os.path.join(HERE, "volumes.json")   # {"sdb": "<volume serial>", ...}
 AGENT_CONFIG = os.environ.get("V2V_AGENT_CONFIG", "/etc/v2v-agent.json")
+MASKS = bootmask.config(os.path.join(HERE, "mask.json"))     # {"sda": [(offset, length)]}
+
+
+def version():
+    try:
+        with open(os.path.join(HERE, "version.json")) as f:
+            return json.load(f).get("version")
+    except (OSError, ValueError):
+        return None
+
+
+def boot_id():
+    with open("/proc/sys/kernel/random/boot_id") as f:
+        return f.read().strip()
+
+
+def mask_status():
+    on = bool(MASKS) and bootmask.active()
+    return {"configured": bool(MASKS), "active": on,
+            "ranges": {k: [list(r) for r in v] for k, v in MASKS.items()}}
+
+
+def hashmap(export, dev, chunk):
+    """cbtsim.hashmap, through the boot mask while it is on."""
+    fd = os.open(dev, os.O_RDONLY)
+    try:
+        ov = bootmask.reader(export, MASKS.get(export), fd)
+        if ov is None:
+            return cbtsim.hashmap(dev, chunk)
+        size = os.lseek(fd, 0, os.SEEK_END)
+        out = []
+        for off in range(0, size, chunk):
+            h = hashlib.sha256()
+            for o in range(off, min(off + chunk, size), 8 << 20):
+                h.update(ov.read(fd, o, min(8 << 20, min(off + chunk, size) - o)))
+            out.append(h.hexdigest())
+        ov.close()
+        return {"size": size, "chunk": chunk, "sha256": out}
+    finally:
+        os.close(fd)
 
 
 def folds():
@@ -218,6 +264,11 @@ def run_convert(exports, netmap=None, crash_consistent=False):
     cmd = ["virt-v2v-in-place", "-v", "-x", "-i", "disk", *disks]
     ntfs = []
     try:
+        if MASKS:
+            # the boot sectors go back onto the system disk before anything reads it
+            st["step"] = "unmask"
+            st["unmask"] = bootmask.unmask(exports, MASKS)
+            NBD.restart(exports)            # serves the disks as they are from now on
         if crash_consistent:
             st["step"] = "ntfsfix"
             ntfs = ntfs_partitions(exports["sda"])
@@ -316,6 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/status":
             self._json({"ramroot": os.path.exists("/etc/v2v-ramroot"),
                         "kvm": os.path.exists("/dev/kvm"),
+                        "version": version(), "boot_id": boot_id(), "mask": mask_status(),
                         "uptime_s": int(time.time() - STATE["started"]),
                         "nbd_port": NBD_PORT,
                         "disks": [disk_info(k, v) for k, v in sorted(self.exports.items())],
@@ -326,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             dev = self.exports.get(q.get("export", "sda"))
             if not dev:
                 return self._json({"error": "unknown export"}, 404)
-            self._json(cbtsim.hashmap(dev, cbtsim.parse_size(q.get("chunk", "64M"))))
+            self._json(hashmap(q.get("export", "sda"), dev, cbtsim.parse_size(q.get("chunk", "64M"))))
         elif u.path == "/convert":
             self._json({**STATE["convert"], "log_tail": tail(CONVERT_LOG)})
         elif u.path == "/relayout":
@@ -423,8 +475,11 @@ class Nbd:
         self.proc, self.lock = None, threading.Lock()
 
     def start(self, exports):
+        masks = [a for k, v in sorted(MASKS.items()) if k in exports
+                 for off, n in v for a in ("--mask", f"{k}={off}:{n}")]
         self.proc = subprocess.Popen([sys.executable, "-I", NBDSERVE, "--port", str(NBD_PORT),
-                                      *[a for k, v in sorted(exports.items()) for a in ("--export", f"{k}={v}")]])
+                                      *[a for k, v in sorted(exports.items()) for a in ("--export", f"{k}={v}")],
+                                      *masks])
 
     def restart(self, exports):
         with self.lock:
@@ -462,7 +517,8 @@ def main():
     NBD.start(exports)
     threading.Thread(target=NBD.watch, daemon=True).start()
     Handler.exports = exports
-    print(f"agent: exports {exports}, folds {folds()}, NBD :{NBD_PORT}, API :{API_PORT}", flush=True)
+    print(f"agent {version()}: exports {exports}, folds {folds()}, mask {mask_status()}, "
+          f"NBD :{NBD_PORT}, API :{API_PORT}", flush=True)
     try:
         ThreadingHTTPServer(("127.0.0.1", API_PORT), Handler).serve_forever()
     finally:

@@ -1,6 +1,6 @@
 # exo-v2v
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied; it is stopped only
@@ -57,7 +57,7 @@ On the replication appliance (a Linux VM in the same vSphere environment, with
 Python 3.10 or later and the [`exo` CLI](https://github.com/exoscale/cli)):
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.0/exo_v2v-0.4.0-py3-none-any.whl
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.1/exo_v2v-0.4.1-py3-none-any.whl
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```

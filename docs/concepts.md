@@ -1,6 +1,6 @@
 # How exo-v2v works
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied. It is stopped only
@@ -67,6 +67,12 @@ Snapshots and changes during replication:
   with a bigger root disk and its agent restarted. Its volumes are kept, and
   only the root disk is copied again.
 - **A disk is added.** The next cycle creates a volume for it and copies it.
+- **The target instance restarts** (by hand, or on the platform's side). It
+  boots nothing: the boot sectors of the system disk stay off the disk until the
+  conversion, so an unconverted copy of the source never runs next to it, and
+  its security group lets nothing out before the cutover. `sync` reports it;
+  `exo-v2v recover NAME` resets the root disk to the receiver template, and the
+  next cycle copies the system disk again and only the changes of the volumes.
 - **A disk is removed.** `sync` stops: plan the migration again.
 
 ## The migration lifecycle

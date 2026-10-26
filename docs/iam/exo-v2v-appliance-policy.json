@@ -54,7 +54,7 @@
         },
         {
           "action": "allow",
-          "expression": "operation in ['add-rule-to-security-group', 'delete-security-group', 'detach-instance-from-security-group'] && (resources.security_group.name.startsWith('exo-v2v-') || resources.security_group.name.startsWith('v2v-'))"
+          "expression": "operation in ['add-rule-to-security-group', 'delete-rule-from-security-group', 'delete-security-group', 'detach-instance-from-security-group'] && (resources.security_group.name.startsWith('exo-v2v-') || resources.security_group.name.startsWith('v2v-'))"
         },
         {
           "action": "allow",

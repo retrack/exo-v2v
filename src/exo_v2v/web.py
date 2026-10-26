@@ -61,6 +61,7 @@ def summary(st):
         "private_ips": [n["ip"] for n in p.get("networks", []) if n.get("ip")],
         "errors": len(p.get("errors", [])), "warnings": len(p.get("warnings", [])),
         "busy": _lock(os.path.join(st.dir, ".lock")),
+        "down": r.get("down"),          # the receiver stopped answering: `exo-v2v recover`
         "updated": os.path.getmtime(st.path),
     }
 

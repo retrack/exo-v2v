@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.1 — 2026-10-26
+
+Safety fix: a target instance that restarted during the replication booted the
+copy of the source VM on its disk.
+
+- **The problem (every release up to 0.4.0).** The target instance runs its agent
+  from RAM while its disks receive the replica. If it restarted before the
+  cutover (by hand, or on the platform's side), it booted that replica:
+  unconverted, on the instance's public IP, next to the running source. In our
+  lab an Ubuntu replica came up in 8 seconds with a default route and internet
+  access; a copy of a production server would start its services, and could
+  write to its data volumes without VMware's change tracking seeing it (later
+  delta cycles would then miss those blocks). Windows replicas do not boot
+  (no virtio drivers before the conversion).
+- **Boot mask.** The agent keeps the first and the last MiB of the system disk
+  (MBR or GPT, boot loader, backup GPT) off the disk until the conversion; the
+  disk holds zeros there, so a restarted instance boots nothing. Reads, `cutover
+  --verify` and the rehearsal's root copy go through the mask; the conversion
+  writes the boot sectors back first. Tested on BIOS and UEFI Linux and on UEFI
+  Windows: restarted, nothing answered for five minutes; recovered; rehearsed;
+  cut over.
+- **No egress before the cutover** (receiver templates). The migration's
+  security group gets an egress rule that matches nothing, so the receiver can
+  send nothing (the appliance's SSH is inbound). The cutover removes it before
+  it stops the source; a rehearsal allows SSH from the production receivers to
+  its relay for the seed and closes it on `destroy`.
+- **`exo-v2v recover NAME`.** `sync` now tells a receiver that stopped answering
+  (it restarted), was stopped, or booted its disk (a receiver created before
+  0.4.1: `sync` stops it) from a network problem. `recover` resets the root disk
+  to the receiver template and restarts the agent; the next cycle copies the
+  system disk again and the volumes only for their changes (in full when the
+  replica may have booted, or with `--full`).
+- **Change IDs kept on the appliance** after every cycle: an agent that restarts
+  in the same boot gets them back instead of forcing a full cycle.
+- Receivers created by 0.4.0 or earlier get the new agent in place at their next
+  `sync` (same boot, change IDs kept, mask on from then) and their egress
+  closed.
+- IAM role: `delete-rule-from-security-group`. Update an existing role with the
+  new `docs/iam/exo-v2v-appliance-policy.json`; without it the cutover stops
+  before anything is stopped and says so.
+- Groups whose members only use the public interface (no private network)
+  could not cut over since 0.3.0: their NICs were never recorded, so the group
+  preflight and the conversion refused them. Fixed, also for receivers that
+  already exist.
+- `exo` errors show the CLI's error line, not its progress output.
+
 ## 0.4.0 — 2026-10-26
 
 Experimental release: rehearsals.

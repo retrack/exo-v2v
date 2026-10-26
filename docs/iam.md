@@ -1,6 +1,6 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.1 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.
@@ -48,7 +48,7 @@ checked `parameters.labels`, while rules on names worked.
 | 10 | Deleting `v2v-*` private networks |
 | 11 | Deleting `v2v-*` anti-affinity groups |
 | 12 | Creating `exo-v2v-*` and `v2v-*` security groups |
-| 13 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
+| 13 | Adding and deleting rules, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
 | 14 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group` or in a group manifest) |
 
 Everything else is denied, including every other Exoscale service. The
@@ -64,7 +64,10 @@ and `reset-instance` (a system disk that grows). 0.3.0 adds what groups need:
 groups. Exoscale evaluates `attach-instance-to-private-network` against the
 private network, not the instance: a rule on the instance name never matches it. 0.4.0 adds
 `create-block-storage-snapshot` (matched on the snapshot's name: the volume is not loaded for
-that operation) and `delete-block-storage-snapshot` for rehearsals.
+that operation) and `delete-block-storage-snapshot` for rehearsals. 0.4.1 adds
+`delete-rule-from-security-group`: a receiver's security group allows no egress until the
+cutover, which removes that rule before it stops the source (without the permission the cutover
+stops there, with nothing stopped).
 
 To update an existing role: `exo iam role update exo-v2v-appliance --policy - < docs/iam/exo-v2v-appliance-policy.json`.
 

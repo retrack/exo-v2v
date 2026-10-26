@@ -6,6 +6,7 @@ volumes so the on-prem sender can write the full copy and CBT deltas. Binds to
 127.0.0.1 by default; the sender reaches it through an SSH tunnel.
 
   nbdserve.py --export sda=/dev/vda --export sdb=/dev/vdb [--bind 127.0.0.1] [--port 10809]
+              [--mask sda=0:1048576 ...]      # boot mask (bootmask.py): kept off the disk
 
 Interoperates with qemu-nbd/nbdcopy/nbd-client (simple replies only).
 """
@@ -21,6 +22,7 @@ import sys
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bootmask  # noqa: E402
 import nbdproto as P  # noqa: E402
 
 log = logging.getLogger("nbdserve")
@@ -53,7 +55,7 @@ TFLAGS = (P.TF_HAS_FLAGS | P.TF_SEND_FLUSH | P.TF_SEND_FUA | P.TF_SEND_TRIM
 
 
 class Export:
-    def __init__(self, name, path, readonly=False):
+    def __init__(self, name, path, readonly=False, mask=None):
         self.name, self.path = name, path
         self.fd = os.open(path, os.O_RDONLY if readonly else os.O_RDWR)
         self.size = os.lseek(self.fd, 0, os.SEEK_END)
@@ -61,9 +63,39 @@ class Export:
         self.readonly = readonly
         self.lock = threading.Lock()
         self.bytes_written = 0
+        # [(offset, length)]: ranges kept in side files until the conversion (bootmask.py)
+        self.mask = bootmask.Mask(name, mask, self.fd) if mask and not readonly else None
 
     def tflags(self):
         return TFLAGS | (P.TF_READ_ONLY if self.readonly else 0)
+
+    def pread(self, length, offset):
+        if self.mask:
+            return self.mask.read(self.fd, offset, length)
+        buf = bytearray()
+        while len(buf) < length:
+            b = os.pread(self.fd, length - len(buf), offset + len(buf))
+            if not b:
+                break
+            buf += b
+        return bytes(buf)
+
+    def pwrite(self, data, offset):
+        if self.mask:
+            self.mask.write(self.fd, data, offset)
+        else:
+            os.pwrite(self.fd, data, offset)
+
+    def zero(self, offset, length):
+        if self.mask:
+            self.mask.zero(self.fd, offset, length, lambda o, n: zero_range(self.fd, self.is_blk, o, n))
+        else:
+            zero_range(self.fd, self.is_blk, offset, length)
+
+    def fsync(self):
+        os.fsync(self.fd)
+        if self.mask:
+            self.mask.fsync()
 
 
 def send_opt_reply(sock, opt, rtype, data=b""):
@@ -138,30 +170,24 @@ def serve_conn(sock, addr, exports):
                 reply(sock, cookie, P.EINVAL)
                 continue
             if cmd == P.CMD_READ:
-                buf = bytearray()
-                while len(buf) < length:
-                    b = os.pread(exp.fd, length - len(buf), offset + len(buf))
-                    if not b:
-                        break
-                    buf += b
-                reply(sock, cookie, 0, bytes(buf))
+                reply(sock, cookie, 0, exp.pread(length, offset))
             elif cmd == P.CMD_WRITE:
                 data = P.recv_exact(sock, length)
                 if exp.readonly:
                     reply(sock, cookie, P.EINVAL)
                     continue
-                os.pwrite(exp.fd, data, offset)
+                exp.pwrite(data, offset)
                 exp.bytes_written += length
                 if flags & 1:  # FUA
-                    os.fsync(exp.fd)
+                    exp.fsync()
                 reply(sock, cookie)
             elif cmd == P.CMD_WRITE_ZEROES:
-                zero_range(exp.fd, exp.is_blk, offset, length)
+                exp.zero(offset, length)
                 if flags & 1:  # FUA
-                    os.fsync(exp.fd)
+                    exp.fsync()
                 reply(sock, cookie)
             elif cmd == P.CMD_FLUSH:
-                os.fsync(exp.fd)
+                exp.fsync()
                 reply(sock, cookie)
             elif cmd == P.CMD_TRIM:
                 reply(sock, cookie)
@@ -179,12 +205,20 @@ def main():
     ap.add_argument("--bind", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=10809)
     ap.add_argument("--readonly", action="store_true")
+    ap.add_argument("--mask", action="append", default=[], metavar="NAME=OFFSET:LENGTH",
+                    help="keep this range off the disk (boot mask), unless bootmask's flag says unmasked")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    masks = {}
+    if bootmask.active():
+        for spec in args.mask:
+            name, rng = spec.split("=", 1)
+            off, n = rng.split(":")
+            masks.setdefault(name, []).append((int(off), int(n)))
     exports = {}
     for spec in args.export:
         name, path = spec.split("=", 1)
-        exports[name] = Export(name, path, args.readonly)
+        exports[name] = Export(name, path, args.readonly, masks.get(name))
     srv = socket.socket(socket.AF_INET6 if ":" in args.bind else socket.AF_INET)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((args.bind, args.port))

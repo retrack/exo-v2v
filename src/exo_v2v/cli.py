@@ -8,6 +8,7 @@ Workflow (each step is resumable; state in ~/.exo-v2v/<name>/):
   exo-v2v cutover  NAME [--verify]      # final cycle (VM powered off), convert, start on Exoscale
   exo-v2v status   [NAME]
   exo-v2v rollback NAME                 # power the source VM back on; receiver stopped
+  exo-v2v recover  NAME                 # a receiver that restarted: reset its root disk, keep the volumes
   exo-v2v cleanup  NAME [--delete-rollback-volumes] [--delete-instance] [--rename NEW]
   exo-v2v group    discover|plan|create|sync|cutover|status|rollback|cleanup GROUP ...
   exo-v2v web      [--listen 127.0.0.1:8780]   # read-only status page
@@ -18,6 +19,7 @@ root inside the replication appliance VM (hot-add transport).
 Exoscale: the `exo` CLI's configured account (exo config) or --account.
 """
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -36,6 +38,12 @@ from .tunnel import Tunnel
 from .util import die, gib_ceil, human, log
 
 LABEL = "exo-v2v"
+# The receiver's security group allows no egress until the cutover: Exoscale turns
+# a group's egress into an allowlist at its first egress rule, and this one
+# matches nothing (TEST-NET-1). Rules whose description starts with "exo-v2v:"
+# are exo-v2v's own and go at the cutover.
+EGRESS_CLOSED = "exo-v2v: no egress before the cutover"
+EGRESS_SINK = "192.0.2.1/32"
 
 
 # ---------------- helpers ----------------
@@ -169,6 +177,7 @@ def cmd_create(a):
     if p["os_family"] == "windows":
         with tunnel_for(st) as t:
             win_support(t)          # staged now: not part of the cutover downtime
+    close_egress(st, ex)
     st.set_phase("receiver-ready")
     print(f"receiver {name} ready at {st['receiver']['ip']}")
 
@@ -179,8 +188,8 @@ def attach_networks(st, ex):
     on, drive the guest's network fix-up at cutover."""
     p, r = st["plan"], st["receiver"]
     nets = [n for n in p.get("networks", []) if n["network"] != "public"]
-    if not nets:
-        return
+    if not p.get("networks"):
+        return                         # a single migration: no network map
     have = {n["network"] for n in r.get("nics", [])}
     for n in nets:
         if n["network"] not in have:
@@ -222,8 +231,7 @@ def install_agent(st, expected_disks, timeout=1800, template_mode=False):
     t = tunnel_for(st)
     wait_ssh(t, timeout)
     cmd = userdata.agent_start_command(expected_disks) if template_mode else userdata.bootstrap_command(expected_disks)
-    payload = userdata.payload_tgz(st["plan"].get("folds", []),
-                                   {v["export"]: v["serial"] for v in st["receiver"]["volumes"] if v.get("serial")})
+    payload = agent_payload(st)
     r = subprocess.run(t.ssh_base() + [f"{t.user}@{t.host}", "sudo sh -c " + repr(cmd)],
                        input=payload, capture_output=True, timeout=300)
     if r.returncode:
@@ -232,6 +240,147 @@ def install_agent(st, expected_disks, timeout=1800, template_mode=False):
     if chk.returncode:
         die("receiver: agent payload missing after install")
     log("agent payload installed; " + ("agent started" if template_mode else "bootstrap started"))
+
+
+def agent_payload(st):
+    return userdata.payload_tgz(st["plan"].get("folds", []),
+                                {v["export"]: v["serial"] for v in st["receiver"]["volumes"] if v.get("serial")},
+                                userdata.boot_mask(st["plan"]))
+
+
+def upgrade_agent(st, t):
+    """A receiver whose agent predates the boot mask (exo-v2v < 0.4.1) gets the
+    current agent in place: same boot, same disks, so its change IDs are kept;
+    the new agent masks the boot sectors it finds on the disk."""
+    exports = sorted(set(mapping_of(st).values()))
+    saved = {e: t.get(f"/meta?export={e}") for e in exports}
+    log("receiver agent predates the boot mask (exo-v2v < 0.4.1): upgrading it in place (change IDs kept)")
+    cmd = userdata.agent_start_command(1 + len(st["receiver"]["volumes"]))
+    r = subprocess.run(t.ssh_base() + [f"{t.user}@{t.host}", "sudo sh -c " + repr(cmd)],
+                       input=agent_payload(st), capture_output=True, timeout=600)
+    if r.returncode:
+        die(f"receiver: agent upgrade failed: {r.stderr.decode(errors='replace')[-400:]}")
+    status = {}
+    for _ in range(90):
+        try:
+            status = t.get("/status", timeout=5)
+            if "mask" in status:
+                break
+        except OSError:
+            pass
+        time.sleep(2)
+    else:
+        die("receiver: the upgraded agent did not come back")
+    for e, m in saved.items():
+        if m.get("change_id"):
+            t.post(f"/meta?export={e}", m)
+    st.data["receiver"]["agent_started"] = time.time() - status.get("uptime_s", 0)
+    st.event("receiver agent upgraded in place (boot mask on)")
+    st.save()
+    return status
+
+
+def close_egress(st, ex):
+    """No egress from the receiver until the cutover (the appliance's SSH is
+    inbound, its replies are stateful): even a copy of the source booted by
+    accident reaches nothing. Template receivers only: a stock-template receiver
+    needs package mirrors again if its root disk is ever reset."""
+    r = st["receiver"]
+    if st["plan"].get("receiver_mode") != "template" or r.get("egress_closed") or not r.get("sg"):
+        return
+    if not any(x.get("description") == EGRESS_CLOSED for x in ex.sg_egress_rules(r["sg"])):
+        ex.sg_rule_add(r["sg"], EGRESS_SINK, 9, proto="udp", desc=EGRESS_CLOSED, flow="egress")
+    r["egress_closed"] = True
+    st.save()
+    log(f"egress of {r['name']} closed until the cutover (security group {r['sg']}; applies within ~2 min)")
+
+
+def open_egress(st, ex):
+    """Before the cutover stops the source: the migrated VM gets its normal egress
+    (the deletion takes a minute or two to apply, less than the cutover itself)."""
+    r = st["receiver"]
+    if not r.get("sg"):
+        return
+    try:
+        rules = [x for x in ex.sg_egress_rules(r["sg"]) if (x.get("description") or "").startswith("exo-v2v:")]
+    except ExoError:
+        rules = []                     # no security group any more
+    for x in rules:
+        try:
+            ex.sg_rule_delete(r["sg"], x["id"])
+        except ExoError as e:
+            die(f"cannot reopen the egress of {r['name']} ({e}). Update the appliance's IAM role with "
+                "docs/iam/exo-v2v-appliance-policy.json (delete-rule-from-security-group); nothing was stopped")
+    if rules:
+        log(f"egress of {r['name']} reopened for the migrated VM")
+    if r.get("egress_closed"):
+        r["egress_closed"] = False
+        st.save()
+
+
+def host_key(ip, timeout=8):
+    """The ed25519 host key `ip` presents, or None when nothing answers."""
+    try:
+        out = subprocess.run(["ssh-keyscan", "-T", str(timeout), "-t", "ed25519", ip],
+                             capture_output=True, text=True, timeout=timeout + 10).stdout
+    except subprocess.TimeoutExpired:
+        return None
+    keys = [ln.split()[2] for ln in out.splitlines() if len(ln.split()) >= 3 and not ln.startswith("#")]
+    return keys[0] if keys else None
+
+
+def receiver_down(st, ex, err):
+    """The receiver's agent is unreachable: tell a restarted receiver from a
+    network problem, stop a receiver that booted its replica, and die."""
+    r = st["receiver"]
+    try:
+        state = ex.instance(r["name"]).get("state")
+    except ExoError as e:
+        die(f"receiver {r['name']} unreachable ({err}); Exoscale: {e}")
+    rec = f"`exo-v2v recover {st.name}`"
+    if state != "running":
+        r["down"] = {"t": time.time(), "state": state, "trust_volumes": True}
+        st.save()
+        die(f"receiver {r['name']} is {state}. Its agent ran from RAM: {rec} resets its root disk "
+            "(copied again at the next sync) and keeps the volumes' copies")
+    key = host_key(r["ip"])
+    kh = os.path.join(st.dir, "known_hosts")
+    known = set()
+    if os.path.exists(kh):
+        known = {ln.split()[2] for ln in open(kh) if len(ln.split()) >= 3 and "ed25519" in ln}
+    if key and known and key not in known:
+        r["down"] = {"t": time.time(), "state": "booted its disk", "trust_volumes": False}
+        st.event("receiver restarted and booted the copy on its disk: stopped")
+        st.save()
+        try:
+            ex.instance_stop(r["name"])
+            stopped = "exo-v2v stopped it: a copy of the source must not run next to the source."
+        except ExoError as e:
+            stopped = f"STOP IT NOW (exo compute instance stop {r['name']}): {e}"
+        die(f"receiver {r['name']} restarted and booted the copy of the source VM on its disk "
+            f"(receivers created before exo-v2v 0.4.1 have no boot mask). {stopped} {rec} resets its "
+            "root disk; the volumes are copied again in full (the copy may have written to them)")
+    if not key:
+        r["down"] = {"t": time.time(), "state": "no SSH", "trust_volumes": True}
+        st.save()
+        die(f"receiver {r['name']} is running but does not answer on SSH: it most likely restarted "
+            f"(with the boot mask, nothing boots). {rec} resets its root disk (copied again at the next "
+            f"sync) and keeps the volumes' copies. ({err})")
+    die(f"receiver {r['name']} answers on SSH but its agent is unreachable: {err}")
+
+
+@contextlib.contextmanager
+def receiver(st, ex):
+    """tunnel_for(st), started, with a diagnosis when the receiver is down."""
+    t = tunnel_for(st)
+    try:
+        t.start()
+    except ConnectionError as e:
+        receiver_down(st, ex, e)
+    try:
+        yield t
+    finally:
+        t.stop()
 
 
 def win_support(t):
@@ -289,14 +438,35 @@ def wait_receiver(st, timeout=1800):
         "/var/log/v2v-bootstrap.log on the instance)")
 
 
-def check_receiver_continuity(st, status):
-    """A receiver that restarted lost its RAM state (/meta): the next cycle must
-    be a full copy - vsync does that automatically when /meta is empty."""
+def check_receiver_continuity(st, t, status):
+    """An agent that restarted lost its RAM state (/meta): in the same boot (same
+    disks, nothing wrote to them) the change IDs saved after the last cycle are
+    restored; otherwise the next cycle is a full copy - vsync does that when
+    /meta is empty."""
+    r = st["receiver"]
     started = time.time() - status.get("uptime_s", 0)
-    prev = st["receiver"].get("agent_started")
+    prev = r.get("agent_started")
     if prev and started - prev > 120:
-        log("receiver agent restarted since the last cycle: next cycle is a full copy")
-    st.data["receiver"]["agent_started"] = started
+        if status.get("boot_id") and status["boot_id"] == r.get("boot_id") and r.get("meta"):
+            back = [e for e, m in r["meta"].items()
+                    if m.get("change_id") and not t.get(f"/meta?export={e}").get("change_id")]
+            for e in back:
+                t.post(f"/meta?export={e}", r["meta"][e])
+            log("receiver agent restarted in the same boot: change IDs restored" + (f" ({', '.join(back)})" if back else ""))
+        else:
+            log("receiver agent restarted since the last cycle: next cycle is a full copy")
+    r["agent_started"] = started
+
+
+def remember_meta(st, t, status):
+    """The change IDs on the appliance as well (the agent keeps them in RAM), with
+    the boot they belong to and whether the boot mask was on: `recover` and an
+    agent restart use them."""
+    r = st["receiver"]
+    r["meta"] = {e: t.get(f"/meta?export={e}") for e in sorted(set(mapping_of(st).values()))}
+    r["boot_id"] = status.get("boot_id")
+    r["mask_active"] = bool((status.get("mask") or {}).get("active"))
+    st.save()
 
 
 def reconcile_disks(st, a, ex, V, vm):
@@ -393,17 +563,22 @@ def rebuild_receiver(st, a, ex):
     restart the agent; the Block Storage volumes are detached first and keep
     their copy (their change IDs are restored), the root disk is copied again."""
     p, r = st["plan"], st["receiver"]
-    log(f"the root disk must grow to {p['root_gb']} GB: resetting {r['name']} (its volumes are kept; "
-        "the system disk is copied again in the next cycle)")
+    if r.get("rebuild_reason") == "recover":
+        log(f"resetting the root disk of {r['name']} to {p['template']} (the system disk is copied again in "
+            "the next cycle; the volumes " + ("keep their copies)" if any(
+                m.get("change_id") for m in (r.get("saved_meta") or {}).values()) else "are copied in full)"))
+    else:
+        log(f"the root disk must grow to {p['root_gb']} GB: resetting {r['name']} (its volumes are kept; "
+            "the system disk is copied again in the next cycle)")
     if "saved_meta" not in r:
         with tunnel_for(st) as t:
             r["saved_meta"] = {v["export"]: t.get(f"/meta?export={v['export']}") for v in r["volumes"]}
         st.save()
-    for v in r["volumes"]:
-        if ex.volume(v["name"]).get("state") == "attached":
-            ex.volume_detach(v["name"])
     if ex.instance(r["name"]).get("state") != "stopped":
         ex.instance_stop(r["name"])                    # Exoscale resets stopped instances only
+    for v in r["volumes"]:                             # (stopped first: a booted copy may use them)
+        if ex.volume(v["name"]).get("state") == "attached":
+            ex.volume_detach(v["name"])
     ex.instance_reset(r["name"], p["template"], p["root_gb"], p.get("template_visibility", "public"))
     if ex.instance(r["name"]).get("state") != "running":
         ex.instance_start(r["name"])
@@ -424,22 +599,56 @@ def rebuild_receiver(st, a, ex):
         for export, m in r["saved_meta"].items():
             if m.get("change_id"):
                 t.post(f"/meta?export={export}", m)
-    r.pop("saved_meta"); r.pop("rebuild_pending", None)
-    st.event(f"receiver reset with a {p['root_gb']} GB root disk")
+        status = t.get("/status")
+    why = r.pop("rebuild_reason", None)
+    r["meta"] = r.pop("saved_meta")                # the volumes' change IDs, in this new boot
+    r.update(boot_id=status.get("boot_id"), mask_active=bool((status.get("mask") or {}).get("active")),
+             agent_started=time.time() - status.get("uptime_s", 0))
+    r.pop("rebuild_pending", None); r.pop("down", None)
+    st.event("receiver recovered (root disk reset)" if why == "recover"
+             else f"receiver reset with a {p['root_gb']} GB root disk")
     st.save()
     log("receiver ready again")
+
+
+def cmd_recover(a):
+    """A receiver that restarted (stopped, unreachable, or booted its disk):
+    reset its root disk to the receiver template and restart the agent. The
+    volumes keep their copies (change IDs saved after the last cycle) when the
+    boot mask was on and nothing booted; otherwise they are copied in full."""
+    st = State.load(a.name)
+    if st["phase"] not in ("receiver-ready", "syncing"):
+        die(f"phase is {st['phase']}: recover is for a receiver during the replication")
+    migration_lock(st, "recover")
+    ex = exo_for(st, a)
+    r = st["receiver"]
+    if not r.get("rebuild_pending"):
+        down = r.get("down") or {}
+        trust = bool(r.get("mask_active")) and down.get("trust_volumes", True) and not a.full
+        meta = r.get("meta") or {}
+        r["saved_meta"] = {v["export"]: meta.get(v["export"], {}) for v in r["volumes"]} if trust else {}
+        r["rebuild_reason"] = "recover"
+        r["rebuild_pending"] = True                  # resumable: run recover again
+        st.save()
+    kept = any(m.get("change_id") for m in (r.get("saved_meta") or {}).values())
+    rebuild_receiver(st, a, ex)
+    vols = "" if not r["volumes"] else ", the volumes' changes only" if kept else ", the volumes in full"
+    print(f"{st.name}: receiver recovered; the next `exo-v2v sync` copies the system disk in full{vols}")
 
 
 def run_cycle(st, a, V, vc, vm, proxy, t, full=False, final=False):
     status = t.get("/status")
     if not status.get("ramroot"):
         die("receiver is not in its RAM root any more (it rebooted from disk?): recreate it (exo-v2v cleanup --delete-instance; create)")
-    check_receiver_continuity(st, status)
+    if "mask" not in status and not final:
+        status = upgrade_agent(st, t)
+    check_receiver_continuity(st, t, status)
     cyc = V.sync(vc, vm, mapping_of(st), t.nbd, t.api, full=full, final=final,
                  shutdown_timeout=a.shutdown_timeout, workers=a.workers, transport=a.transport, proxy=proxy)
     cyc["t"] = time.time()
     st.data["cycles"].append(cyc)
     st.save()
+    remember_meta(st, t, status)
     return cyc
 
 
@@ -488,10 +697,11 @@ def cmd_sync(a):
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True) or log("stopping after this cycle"))
     try:
         st.set_phase("syncing")
+        close_egress(st, ex)
         n = 0
         while True:
             changed = reconcile_disks(st, a, ex, V, vm)
-            with tunnel_for(st) as t:
+            with receiver(st, ex) as t:
                 cyc = run_cycle(st, a, V, vc, vm, proxy, t, full=a.full and n == 0)
                 n += 1
                 log(f"cycle {len(st['cycles'])}: {sum(d['covered'] for d in cyc['disks'].values()) / 2**20:.0f} MiB "
@@ -592,6 +802,8 @@ def convert(st, ex, t, extra=None):
     fix-up), then the volume rebuilds and a flush. Resumes after an interruption:
     a conversion that already finished is not run again."""
     steps = st.data["cutover_steps"]
+    if st["plan"].get("networks") and not st["receiver"].get("nics"):
+        attach_networks(st, ex)        # a public-only member created before 0.4.1 never recorded its NICs
     if "converted" not in steps:
         c = t.get("/convert")
         if c["state"] == "done" and steps.get("convert_started"):
@@ -650,7 +862,9 @@ def cmd_cutover(a):
         try:
             if "down_at" not in steps:
                 reconcile_disks(st, a, ex, V, vm)    # before the downtime starts
-            with tunnel_for(st) as t:
+            with receiver(st, ex) as t:
+                if "source_off" not in steps:
+                    open_egress(st, ex)
                 if st["phase"] != "cutover":
                     st.set_phase("cutover")
                 if "final_cycle" not in steps:
@@ -765,6 +979,9 @@ def cmd_status(a):
                   f"({', '.join(f'{k}:{v['mode']} {human(v['covered'])}' for k, v in last['disks'].items())})")
         if "downtime_s" in st.data:
             print(f"  downtime {st['downtime_s']}s")
+        if r.get("down"):
+            print(f"  RECEIVER DOWN ({r['down']['state']}, {int(time.time() - r['down']['t'])}s ago): "
+                  f"exo-v2v recover {n}")
         if a.verbose:
             print_plan(p)
 
@@ -899,6 +1116,10 @@ def main(argv=None):
     s = sub.add_parser("status"); s.add_argument("name", nargs="?"); s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(fn=cmd_status)
     s = sub.add_parser("rollback"); s.add_argument("name"); s.set_defaults(fn=cmd_rollback)
+    s = sub.add_parser("recover", help="a receiver that restarted: reset its root disk, keep the volumes' copies")
+    s.add_argument("name"); s.add_argument("--timeout", type=int, default=1800)
+    s.add_argument("--full", action="store_true", help="copy the volumes in full too")
+    s.set_defaults(fn=cmd_recover)
     s = sub.add_parser("cleanup"); s.add_argument("name")
     s.add_argument("--delete-rollback-volumes", action="store_true")
     s.add_argument("--delete-instance", action="store_true", help="delete the receiver/instance and its volumes")

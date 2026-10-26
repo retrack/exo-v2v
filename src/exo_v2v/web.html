@@ -135,7 +135,7 @@ function viewOverview(d) {
   const row = m => `<tr>
     <td><a href="#/m/${enc(m.name)}">${esc(m.name)}</a><div class="muted">${esc(m.vm)}</div></td>
     <td class="hide-s">${m.group ? `<a href="#/g/${enc(m.group)}">${esc(m.group)}</a>` : '<span class="muted">–</span>'}</td>
-    <td>${badge(m.phase)} ${busy(m.busy)}</td>
+    <td>${badge(m.phase)} ${busy(m.busy)}${m.down ? ` <span class="badge p-failed" title="exo-v2v recover ${esc(m.name)}">receiver down</span>` : ""}</td>
     <td>${lastCycle(m.last_cycle)}</td>
     <td class="mono hide-s">${esc(m.ip || "–")}${m.private_ips.length ? `<div class="muted">${m.private_ips.map(esc).join(" ")}</div>` : ""}</td>
     <td class="num">${m.downtime_s != null ? dur(m.downtime_s) : '<span class="muted">–</span>'}</td></tr>`;

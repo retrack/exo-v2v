@@ -33,7 +33,7 @@ import urllib.request
 from . import plan as planmod
 from .exo import Exo, ExoError
 from .state import State, home
-from .util import die, human, log, write_json_atomic
+from .util import die, human, log, log_prefix, write_json_atomic
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 VM_KEYS = {"vm", "tier", "security_groups", "health", "ip", "name", "instance_type", "system_disk",
@@ -735,6 +735,9 @@ def preflight(g, a, sts):
         busy = member_busy(x["migration"])
         if busy:
             problems.append(f"{x['vm']}: a {busy['what']} is running (pid {busy['pid']})")
+        if st["plan"].get("networks") and not st["receiver"].get("nics"):
+            from .cli import attach_networks
+            attach_networks(st, ex)        # public-only members created before 0.4.1 never recorded their NICs
         have = {n["network"] for n in st["receiver"].get("nics", [])}
         miss = [n["network"] for n in st["plan"].get("networks", []) if n["network"] not in have]
         if miss:
@@ -814,6 +817,14 @@ def cmd_cutover(a):
                     raise GroupFailure(f"warm cycle failed on {', '.join(f'{k} ({v})' for k, v in bad.items())}"
                                        " — nothing was stopped")
                 mark("warm")
+            if "egress_open" not in steps:
+                # before anything stops: a member that cannot get its egress back fails here
+                from .cli import open_egress
+                ex = Exo(m["zone"], a.account)
+                for x in g.members():
+                    with log_prefix(x["vm"]):
+                        open_egress(State.load(x["migration"]), ex)
+                mark("egress_open")
             ctx = ctx_of(g)
             if "pre_hook" not in steps:
                 run_hook(g, "pre_cutover", ctx)
