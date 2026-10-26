@@ -12,6 +12,7 @@ open http://HOST:8780/login?token=TOKEN once (it sets a cookie).
   GET /api/migrations/NAME               one migration: plan, cycles, cutover steps, events
   GET /api/groups/NAME                   one group: members by tier, cutover, events
   GET /api/groups/NAME/log/VM?lines=N    the tail of a member's log
+  GET /api/rehearsals/NAME               one rehearsal: copies, relay, steps, report
 """
 import hmac
 import ipaddress
@@ -77,6 +78,32 @@ def detail(st):
     return d
 
 
+def rehearsal_doc(name, full=False):
+    from .rehearsal import rdir, shadow_name
+    try:
+        r = json.load(open(os.path.join(rdir(), name, "rehearsal.json")))
+    except (OSError, ValueError):
+        return None
+    s = r.get("settings") or {}
+    copies = []
+    for m in r.get("members", []):
+        st = _load(shadow_name(m["migration"]))
+        c = {"vm": m["vm"], "tier": m["tier"], "migration": m["migration"]}
+        if st:
+            c.update(phase=st["phase"], address=st["receiver"].get("ip"), name=shadow_name(m["migration"]),
+                     private_ips=[n["ip"] for n in st["plan"].get("networks", []) if n.get("ip")],
+                     health=st.data.get("rehearsal_health"), seed=st.data.get("seed"),
+                     boot_s=st.data.get("rehearsal_boot_s"), busy=_lock(os.path.join(st.dir, ".lock")))
+        copies.append(c)
+    out = {"name": name, "state": r.get("state"), "step": r.get("step"), "created": r.get("created"),
+           "ttl": s.get("ttl"), "ttl_s": s.get("ttl_s"), "relay": (r.get("relay") or {}).get("ip"),
+           "copies": copies, "error": r.get("error"), "busy": _lock(os.path.join(rdir(), name, ".lock"))}
+    if full:
+        out.update(steps=r.get("steps", {}), networks=r.get("networks", []), report=r.get("report"),
+                   events=r.get("events", [])[-300:], access=s.get("access", []), hosts=s.get("hosts", {}))
+    return out
+
+
 def group_doc(name, full=False):
     from .group import groups_dir
     gdir = os.path.join(groups_dir(), name)
@@ -94,6 +121,8 @@ def group_doc(name, full=False):
     out = {"name": name, "zone": m.get("zone"), "members": members, "cutover": g.get("cutover"),
            "last_sync": g.get("last_sync"), "busy": _lock(os.path.join(gdir, ".lock")),
            "updated": os.path.getmtime(os.path.join(gdir, "group.json"))}
+    rh = rehearsal_doc(name)
+    out["rehearsal"] = rh if rh and rh["state"] != "destroyed" else None
     if full:
         out.update(events=g.get("events", [])[-300:], resources=g.get("resources", {}),
                    networks=m.get("networks", {}), hooks=m.get("hooks", {}), settings=m.get("cutover", {}),
@@ -103,13 +132,16 @@ def group_doc(name, full=False):
 
 def overview():
     from .group import Group
+    from .rehearsal import Rehearsal
     migs = []
     for n in State.all():
         st = _load(n)
-        if st:
+        if st and not st.data.get("rehearsal_of"):         # copies show under their rehearsal
             migs.append(summary(st))
+    rhs = [r for r in (rehearsal_doc(n) for n in Rehearsal.all()) if r and r["state"] != "destroyed"]
     return {"host": socket.gethostname(), "version": __version__, "now": time.time(), "home": home(),
-            "groups": [g for g in (group_doc(n) for n in Group.all()) if g], "migrations": migs}
+            "groups": [g for g in (group_doc(n) for n in Group.all()) if g], "migrations": migs,
+            "rehearsals": rhs}
 
 
 def tail(path, lines):
@@ -181,6 +213,10 @@ class Handler(BaseHTTPRequestHandler):
                 from .group import Group
                 g = group_doc(parts[2], full=True) if parts[2] in Group.all() else None
                 return self._send(200, g) if g else self._send(404, {"error": "no such group"})
+            if len(parts) == 3 and parts[:2] == ["api", "rehearsals"]:
+                from .rehearsal import Rehearsal
+                r = rehearsal_doc(parts[2], full=True) if parts[2] in Rehearsal.all() else None
+                return self._send(200, r) if r else self._send(404, {"error": "no such rehearsal"})
             if len(parts) == 5 and parts[:2] == ["api", "groups"] and parts[3] == "log":
                 from .group import Group, groups_dir
                 if parts[2] not in Group.all():

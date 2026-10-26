@@ -1,8 +1,8 @@
 # Limitations
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
-Known limits of exo-v2v 0.3.0. `exo-v2v plan` reports the ones it can detect
+Known limits of exo-v2v 0.4.0. `exo-v2v plan` reports the ones it can detect
 before anything is created.
 
 ## Source VM
@@ -69,6 +69,17 @@ exo-v2v adapts data volumes at cutover, with these limits:
 | DNS servers | Static DNS servers in the guests' configurations are kept; change on-premises ones before or during the cutover (`post_cutover` hook) |
 | Elastic IPs | Not handled: the load balancer keeps its instance's public IP, known from `group create` on |
 | Health checks | Run from the appliance against the members' public IPs (the ports are opened to the appliance only) |
-| Rehearsal | No test cutover on copies yet |
 | Rollback after conversion | Converted members must be created again before another attempt (a full copy) |
+
+## Rehearsal
+
+| Limit | Details |
+|---|---|
+| Receiver templates | A rehearsal needs receiver templates built with exo-v2v 0.4 or later (copies without a public IP read their metadata from a drive, not from the metadata server) |
+| Consistency | Each copy is crash-consistent at its own seed time; copies seeded minutes apart are not consistent with each other at one instant |
+| What it cannot test | The public side (public IP, DNS switch, security groups on the public interface) and anything that needs the internet or on-premises systems: those fail by design; the report lists the names the copies tried to resolve |
+| Windows | Activation and domain servers are unreachable unless they are members of the group |
+| Metadata drive | The copies see a small extra disk (1 MiB) as their second disk: mount data disks by UUID or label, not by device name |
+| Windows copies | Crash-consistent NTFS: the copy's system volume journal is reset before conversion and checked by Windows at first boot |
+| Cost | One instance per copy plus the relay, and the copies' volumes, for the rehearsal's lifetime (TTL 8 h by default with `exo-v2v gc`) |
 

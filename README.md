@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -30,6 +30,7 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | Replication | Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance |
 | **Applications** | A [group](docs/groups.md) of VMs (load balancer, application servers, databases) replicated together and cut over in one window: stopped front to back, converted in parallel, started back to front with health checks, rolled back as a whole |
 | Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs |
+| **Rehearsal** | Copies of the VMs started from their replicas, converted as at cutover, [**airgapped**](docs/rehearsal.md) (no public IP, isolated networks, no router) and reachable only by SSH through a relay; health checks, a predicted cutover window, the outside names the copies tried to resolve; the sources and replication carry on |
 | Status page | A read-only [web page](docs/web.md) on the appliance with every migration and group |
 | Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](docs/limitations.md)) |
 
@@ -46,6 +47,7 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 | [Supported operating systems](docs/supported-os.md) | Tested and expected-to-work guests |
 | [Limitations](docs/limitations.md) | Known limits and their workarounds |
 | [Moving an application](docs/groups.md) | Groups: the manifest, private networks, the coordinated cutover, rollback |
+| [Rehearsal](docs/rehearsal.md) | Airgapped copies of the VMs to check before the cutover |
 | [Web status page](docs/web.md) | The read-only status page and its API |
 | [Operations runbook](docs/OPERATIONS.md) | Step-by-step migration, rollback, troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Design details for contributors |
@@ -62,8 +64,8 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.3.0/exo_v2v-0.3.0-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.3.0   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.4.0/exo_v2v-0.4.0-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.4.0   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -91,11 +93,13 @@ exo-v2v group discover shop --vm lb01 --vm app01 --vm app02 --vm db01 --zone ch-
 exo-v2v group plan    shop -f shop.yaml   # tiers, networks, health checks, hooks: every member planned
 exo-v2v group create  shop                # private networks (addresses kept), anti-affinity, receivers
 sudo -E exo-v2v group sync shop --every 900
+sudo -E exo-v2v group rehearse shop       # airgapped copies to check first, through a relay
+exo-v2v rehearsal destroy shop
 sudo -E exo-v2v group cutover shop        # stop front to back, convert in parallel, start back to front
 sudo -E exo-v2v web                       # read-only status page on 127.0.0.1:8780
 ```
 
-See [Moving an application](docs/groups.md) and [Web status page](docs/web.md).
+See [Moving an application](docs/groups.md), [Rehearsal](docs/rehearsal.md) and [Web status page](docs/web.md).
 
 ## What cutover does
 

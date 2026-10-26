@@ -1,6 +1,6 @@
 # exo-v2v architecture
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## Components
 
@@ -9,6 +9,7 @@
 | CLI / orchestrator | replication appliance (Linux VM in vSphere) | `exo_v2v/cli.py`, `plan.py`, `state.py`, `exo.py`, `tunnel.py` |
 | Group orchestrator | appliance; members run as child processes | `exo_v2v/group.py` |
 | Web status page (read-only) | appliance | `exo_v2v/web.py`, `web.html` |
+| Rehearsal (airgapped copies) | appliance; a relay instance; the copies' receivers | `exo_v2v/rehearsal.py`, `receiver/rootcopy.py` |
 | vSphere replication (sender) | appliance, as root | `exo_v2v/vsphere.py` |
 | Receiver agent | the target Exoscale instance, booted **from RAM** | `exo_v2v/receiver/agent.py`, `nbdserve.py`, `guestfix.py` |
 | Receiver bootstrap (stock template) | target instance, first boot | `receiver/bootstrap-kexec.sh`; `userdata.py` (key-only user-data, payload tarball) |
@@ -239,6 +240,53 @@ all instances, then starts tier by tier from the back with health checks.
 `group rollback` stops the converted instances front first and calls the
 per-VM rollback back end first; a member whose conversion had not started
 keeps its receiver and returns to `syncing`.
+
+## Rehearsal
+
+`rehearsal.py` builds, per rehearsal, a state in `rehearsals/NAME/rehearsal.json`
+and one migration state per copy (`<migration>-rh`, `data["rehearsal_of"]`), so
+that the per-VM functions (`install_agent`, `attach_networks`, `convert`,
+`stop_and_scale`, `cleanup`) work on copies unchanged; `Tunnel` takes a `jump`
+(the relay) and goes through it with `ProxyCommand ssh -W` (`-J` would not carry
+the options).
+
+- **Networks**: the front network (`front_cidr`) and a copy of each production
+  private network (same CIDR), DHCP option 6 = the relay. The relay's address
+  is the highest free address of each range; it also takes the guests'
+  on-premises DNS addresses that fall inside a rehearsal network (from the
+  VMware Tools inventory), so their lookups reach the sinkhole too.
+- **Relay**: stock Debian; cloud-init writes sysctl (no forwarding), nftables
+  (`forward` drop), sshd (`AllowTcpForwarding local`, `PermitOpen none` until
+  the copies' addresses are known), a minimal dnsmasq. exo-v2v then writes
+  networkd files per rehearsal NIC (matched by MAC, static addresses, no
+  routes), the final dnsmasq (`no-resolv`, `address=/name/ip`, `log-queries`)
+  and `PermitOpen` (the copies' addresses).
+- **Copies' receivers**: `instance create --public-ip none --private-network
+  <front>`; the front lease (dynamic, kept for the instance's life) is the
+  address the appliance uses; private networks attached with `--ip`. Such an
+  instance has no route to the metadata server: Exoscale attaches a NoCloud
+  drive (seen as `vdb`, 1 MiB, iso9660, not flagged read-only); `v2v-userdata-key`
+  (template) reads it, and the agent skips read-only or tiny disks
+  (`config_drive`) and finds the root disk as the first disk without a serial.
+- **Seeding** with the production migration's lock held: `block-storage
+  snapshot create` → `block-storage create --snapshot` → attach (the snapshot
+  is deleted right away: the volume does not depend on it); the agent installed
+  with the copy's `volumes.json`; then the production receiver runs
+  `rootcopy.py` (pushed to `/run`): 8 MiB chunks, zero chunks as WRITE_ZEROES,
+  4 NBD connections, through `ssh -L` to the copy via the relay.
+- **Airgap check** through the API (`public-ip == none`, rehearsal networks
+  only, no `routers` option) and on the relay (`ip_forward`, the nftables chain).
+- **Conversion**: `convert()` with the copy's NIC map and `crash_consistent`: the
+  agent runs `ntfsfix -d` on the system disk's NTFS partitions before
+  virt-v2v (a running Windows' replica has an unclean journal, mounted
+  read-only by libguestfs) and plain `ntfsfix` after (dirty flag: `chkdsk` at
+  first boot); journaled Linux filesystems replay on mount. Then `stop_and_scale`.
+  Start per tier; the port and the health checks are tested on the relay
+  (`nc`, `curl`).
+- **Destroy**: per copy `cleanup --delete-instance --force`, then a sweep by
+  name (`v2v-<name>-*-rh*`) of instances, volumes and snapshots, the networks
+  and the relay's security group. `exo-v2v gc` destroys the rehearsals past
+  their TTL.
 
 ## Web status page
 

@@ -38,6 +38,7 @@ from .util import die, human, log, write_json_atomic
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 VM_KEYS = {"vm", "tier", "security_groups", "health", "ip", "name", "instance_type", "system_disk",
            "receiver_template", "receiver_template_visibility", "fold", "no_fold"}
+REHEARSAL_KEYS = {"access", "ssh_keys", "front_cidr", "hosts", "ttl"}
 DEFAULTS = {"cutover": {"parallel": 8, "max_window": None, "rollback_on_failure": False, "verify": False,
                         "health_timeout": "10m", "boot_timeout": "15m", "max_sync_age": "6h"},
             "sync": {"parallel": 4}}
@@ -140,6 +141,17 @@ def validate(m, where="manifest"):
         for r in rules or []:
             parse_rule(r, bad)
     m["hooks"] = m.get("hooks") or {}
+    m["rehearsal"] = m.get("rehearsal") or {}
+    if set(m["rehearsal"]) - REHEARSAL_KEYS:
+        bad(f"rehearsal takes {', '.join(sorted(REHEARSAL_KEYS))}")
+    try:
+        for c in m["rehearsal"].get("access") or []:
+            ipaddress.ip_network(c, strict=False)
+        if m["rehearsal"].get("front_cidr"):
+            ipaddress.ip_network(m["rehearsal"]["front_cidr"], strict=False)
+        duration(m["rehearsal"].get("ttl"))
+    except ValueError as e:
+        bad(f"rehearsal: {e}")
     for k in ("cutover", "sync"):
         m[k] = {**DEFAULTS[k], **(m.get(k) or {})}
     for k in ("max_window", "health_timeout", "boot_timeout", "max_sync_age"):
@@ -751,6 +763,10 @@ def human_age(t):
 def cmd_cutover(a):
     from .cli import exo_for, start_instance, stop_and_scale
     g = Group.load(a.name)
+    from .rehearsal import active_for
+    busy = sorted({active_for(x["migration"]) for x in g.members()} - {None})
+    if busy and not a.allow_rehearsal:
+        die(f"rehearsal {', '.join(busy)} is up: `exo-v2v rehearsal destroy {busy[0]}` first, or --allow-rehearsal")
     g.lock("cutover")
     m = g.m
     cut = g.data.get("cutover") or {}
@@ -1040,6 +1056,23 @@ def cmd_status(a):
     names = [a.name] if a.name else Group.all()
     for n in names:
         print_status(Group.load(n))
+        from .rehearsal import Rehearsal
+        rh = Rehearsal.load(n, must=False)
+        if rh.active:
+            print(f"  rehearsal: {rh.data.get('state')} at {rh.data.get('step')}, relay "
+                  f"{rh.data.get('relay', {}).get('ip', '-')} (`exo-v2v rehearsal status {n}`)")
+
+
+def cmd_rehearse(a):
+    """Airgapped copies of the group's members (see `exo-v2v rehearse --help`)."""
+    from . import rehearsal as R
+    g = Group.load(a.name)
+    members = [{"vm": x["vm"], "migration": x["migration"], "tier": x["tier"],
+                "health": State.load(x["migration"])["plan"].get("health") or {}}
+               for x in g.members() if not a.vm or x["vm"] in a.vm]
+    if not members:
+        die(f"no member of {a.name} matches {a.vm}")
+    R.rehearse(g.name, members, R.settings_of(g.m.get("rehearsal"), a), g.m["zone"], a)
 
 
 # ---------------- argparse ----------------
@@ -1063,7 +1096,13 @@ def add_parser(sub):
     s.add_argument("name"); s.add_argument("--every", type=int); s.add_argument("--cycles", type=int)
     s.add_argument("--parallel", type=int); s.add_argument("--full", action="store_true")
     s.set_defaults(fn=cmd_sync)
+    s = gs.add_parser("rehearse", help="start airgapped copies of the members, reachable through a relay")
+    s.add_argument("name"); s.add_argument("--vm", action="append", help="only these members (repeatable)")
+    from .rehearsal import add_options
+    add_options(s)
+    s.set_defaults(fn=cmd_rehearse)
     s = gs.add_parser("cutover", help="the coordinated cutover (resumable)")
+    s.add_argument("--allow-rehearsal", action="store_true", help="cut over although a rehearsal is up")
     s.add_argument("name"); s.add_argument("--verify", action="store_true")
     s.add_argument("--no-warm-cycle", action="store_true"); s.set_defaults(fn=cmd_cutover)
     s = gs.add_parser("status"); s.add_argument("name", nargs="?"); s.set_defaults(fn=cmd_status)

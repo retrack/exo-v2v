@@ -544,6 +544,44 @@ def group_cutover():
          "member's own cutover, not the sum of them.", y0=60)
 
 
+# ---------------------------------------------------------------- 9. rehearsal (architecture)
+def rehearsal():
+    b = []
+    b.append(zone(48, 80, 232, 360, "VSPHERE · KEEPS RUNNING"))
+    b.append(zone(312, 80, 248, 360, "EXOSCALE · PRODUCTION"))
+    b.append(zone(592, 80, 328, 360, "REHEARSAL · AIRGAPPED"))
+    # arrows first
+    b.append(path("M 256,168 H 336", "muted"))
+    b.append(label(296, 168, "CBT SYNC"))
+    b.append(path("M 536,152 H 616", "accent"))
+    b.append(label(576, 152, "SNAPSHOTS", ACCENT))
+    b.append(path("M 448,196 V 360 H 616", "accent"))
+    b.append(label(None, 280, "ROOT DISK, VIA THE RELAY", ACCENT, side="left", x_line=448))
+    b.append(path("M 728,336 V 216", "link"))
+    b.append(label(None, 276, "SSH ONLY", LINK, side="right", x_line=728))
+    b.append(path("M 256,384 H 336 Q 344,384 344,392 V 408 Q 344,416 352,416 H 616", "link"))
+    b.append(label(480, 416, "SSH: APPLIANCE + ALLOWED ADDRESSES", LINK))
+    b.append(path("M 840,168 H 900", "muted", dashed=True))
+    # nodes
+    b.append(node(72, 136, 184, 64, "input", "VM", "Source VMs", "running, untouched"))
+    b.append(node(72, 352, 184, 64, "external", "PEOPLE", "Appliance, testers", "ssh, port forwards"))
+    b.append(node(336, 136, 200, 64, "store", "RECEIVERS", "Production replicas", "sync goes on"))
+    b.append(node(616, 120, 224, 96, "focal", "COPIES", "Rehearsal copies", "no public IP, no router", "same addresses, isolated networks"))
+    b.append(node(616, 336, 224, 96, "backend", "RELAY", "Relay", "no forwarding, no NAT", "DNS sinkhole, health checks"))
+    b.append(f'<text x="904" y="164" fill="{ACCENT}" font-size="14" font-family="{SANS}" text-anchor="middle">×</text>')
+    b.append(f'<text x="880" y="188" fill="{SOFT}" font-size="7" font-family="{MONO}" text-anchor="middle" letter-spacing="0.08em">NO ROUTE</text>')
+    b.append(legend(480, 48, 872, [("store", "Production"), ("focal", "Airgapped copy"), ("accent", "Seeding"),
+                                   ("link", "SSH access")]))
+    page("rehearsal", "Architecture · exo-v2v rehearsal", "A rehearsal",
+         "Copies of the replicated VMs are seeded from the production replicas, Block Storage snapshots for the "
+         "volumes and a root disk stream through the relay, then converted and started on isolated networks "
+         "without a public IP or a router. People reach them only by SSH through the relay, which does not "
+         "forward traffic. The sources and the production replication carry on.",
+         960, 580, "\n".join(b),
+         "The copies keep the production addresses on their own networks; nothing they send leaves the "
+         "rehearsal. The relay's DNS answers listed names only and logs every query.", y0=56)
+
+
 architecture()
 lifecycle()
 replication()
@@ -552,4 +590,5 @@ create_template()
 downtime()
 disks()
 group_cutover()
+rehearsal()
 print("written:", ", ".join(p.name for p in sorted(OUT.glob("*.html"))))

@@ -1,14 +1,28 @@
+import contextlib
 import json
 import os
 import sys
+import threading
 import time
 
 _QUIET = False
+_ctx = threading.local()
 
 
 def log(msg):
     if not _QUIET:
-        print(f"[{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+        print(f"[{time.strftime('%H:%M:%S')}] {getattr(_ctx, 'prefix', '')}{msg}", file=sys.stderr, flush=True)
+
+
+@contextlib.contextmanager
+def log_prefix(prefix):
+    """Prefix this thread's log lines (several members worked on in parallel)."""
+    old = getattr(_ctx, "prefix", "")
+    _ctx.prefix = f"[{prefix}] "
+    try:
+        yield
+    finally:
+        _ctx.prefix = old
 
 
 def die(msg, code=1):
@@ -28,7 +42,7 @@ def gib_ceil(nbytes):
 
 
 def write_json_atomic(path, obj):
-    tmp = f"{path}.tmp"
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"   # threads may save the same state
     with open(tmp, "w") as f:
         json.dump(obj, f, indent=1, default=str)
         f.flush()

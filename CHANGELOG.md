@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.4.0 — 2026-10-26
+
+Experimental release: rehearsals.
+
+- **Rehearsal (`exo-v2v group rehearse`, `exo-v2v rehearse`).** Copies of the
+  VMs, seeded from their replicas while the sources keep running, converted with
+  the cutover's own code and started in the cutover's tier order with the
+  health checks, for people to check the application before the real move.
+  The copies are **airgapped**: created without a public IP (Exoscale sets it at
+  creation), on isolated copies of the private networks plus a front network
+  standing in for the public interface, with no router. They keep the
+  production addresses without meeting production. People reach them only
+  through a **relay**: SSH from the appliance and the addresses listed in the
+  manifest, keys only, forwarding only to the copies, no routing, no NAT. Its
+  DNS answers the names you list, refuses the rest at once and logs every
+  query: the report lists the outside names the application tried to reach.
+  An airgap check through the API runs before any copy boots its converted
+  system. Seeding takes Block Storage snapshots of the replicas' volumes and
+  streams each replica's root disk from its production receiver through the
+  relay (zero blocks skipped), the migration's lock held for minutes; the next
+  sync is an ordinary delta. `rehearsal status / connect (ssh config, port
+  forwards) / report (times, predicted cutover window, DNS log) / destroy`,
+  a TTL (8 h by default) and `exo-v2v gc` for cron. Resumable. The web page
+  shows rehearsals. Windows copies (crash-consistent NTFS) get their system
+  journal reset before conversion and a `chkdsk` at first boot. `cutover` refuses while a rehearsal of the same VMs is up
+  (`--allow-rehearsal`).
+- **Receiver templates read the NoCloud drive.** An instance without a public
+  IP cannot reach the metadata server; Exoscale gives it a read-only NoCloud
+  drive instead. `v2v-userdata-key` reads either; the agent never exports that
+  drive and finds the root disk as the first disk without a serial. Rebuild
+  your receiver templates to rehearse.
+- SSH prefers AES-GCM (faster with AES-NI); `Tunnel` can go through a relay.
+- IAM role: `create-block-storage-snapshot` (matched on the snapshot's name)
+  and `delete-block-storage-snapshot`. Update an existing role with the new
+  `docs/iam/exo-v2v-appliance-policy.json`.
+
 ## 0.3.0 — 2026-10-23
 
 Experimental release: applications moved as a whole, private networks, a

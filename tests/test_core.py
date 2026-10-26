@@ -90,7 +90,7 @@ def test_coalesce_and_flat_path():
     assert V.coalesce([(0, 10), (1 << 30, 10)], gap=1000) == [(0, 10), (1 << 30, 10)]
     big = V.coalesce([(0, 200 << 20)])
     assert all(n <= V.MAX_RANGE for _s, n in big) and sum(n for _s, n in big) == 200 << 20
-    assert V.flat_path("[ds-lab] vm/vm_1.vmdk") == ("ds-lab", "vm/vm_1-flat.vmdk")
+    assert V.flat_path("[datastore1] vm/vm_1.vmdk") == ("datastore1", "vm/vm_1-flat.vmdk")
 
 
 # ---------------- guestfix: tables + probes on image files ----------------
@@ -419,7 +419,7 @@ def nic(mac, pg, ips=(), origin="manual", label="Network adapter 1"):
             "ips": [{"ip": i, "prefix": 24, "origin": origin} for i in ips]}
 
 
-NETS = {"front": {"source": "pg-lab", "type": "public"},
+NETS = {"front": {"source": "pg-front", "type": "public"},
         "app": {"source": "pg-app", "type": "private", "cidr": "10.20.0.0/24", "keep_addresses": True,
                 "exoscale_name": "v2v-shop-app"}}
 
@@ -434,7 +434,7 @@ def test_network_map_private_static_gets_public_nic_first():
 
 
 def test_network_map_load_balancer_two_nics():
-    nets, errs = plan.network_map([nic("00:50:56:00:00:01", "pg-lab", ["10.77.0.50"], "dhcp"),
+    nets, errs = plan.network_map([nic("00:50:56:00:00:01", "pg-front", ["192.168.10.50"], "dhcp"),
                                    nic("00:50:56:00:00:10", "pg-app", ["10.20.0.10"], label="Network adapter 2")], NETS)
     assert not errs
     assert nets[0]["source_mac"] == "00:50:56:00:00:01" and nets[1]["ip"] == "10.20.0.10"
@@ -549,3 +549,117 @@ def test_web_is_read_only_and_serves_state(tmp_path, monkeypatch):
         web.Handler.token = None
         srv.shutdown()
     assert sorted(p.stat().st_mtime for p in tmp_path.rglob("*") if p.is_file()) == before
+
+
+# ---------------- rehearsal (0.4) ----------------
+
+from exo_v2v import rehearsal as RH  # noqa: E402
+
+
+class FakeExo:
+    def __init__(self, nets):
+        self.nets = nets
+
+    def privnet(self, name):
+        return self.nets[name]
+
+
+class FakeSt:
+    def __init__(self, plan, name="shop-db01"):
+        self.data = {"plan": plan}
+        self.name = name
+
+    def __getitem__(self, k):
+        return self.data[k]
+
+
+def test_rehearsal_layout_relay_address_and_dns_aliases(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXO_V2V_HOME", str(tmp_path))
+    plan_ = {"group": "shop", "networks": [{"network": "public"},
+                                           {"network": "v2v-shop-app", "ip": "10.20.0.31", "name": "app"}],
+             "inventory": {"nics": [{"dns": ["10.20.0.1", "8.8.8.8", "fe80::1"]}]}}
+    plan2 = {"group": "shop", "networks": [{"network": "public"},
+                                           {"network": "v2v-shop-app", "ip": "10.20.0.253", "name": "app"}]}
+    rh = RH.Rehearsal("shop")
+    rh.data = {"settings": {**RH.DEFAULTS, "front_cidr": "100.127.0.0/24"}}
+    ex = FakeExo({"v2v-shop-app": {"start_ip": "10.20.0.1", "netmask": "255.255.255.0"}})
+    nets = RH.layout(rh, {"db01": FakeSt(plan_), "x": FakeSt(plan2, "shop-x")}, ex)
+    assert [n["name"] for n in nets] == ["v2v-shop-rh-front", "v2v-shop-rh-app"]
+    front, app = nets
+    assert front["relay_ip"] == "100.127.0.253" and front["aliases"] == []
+    assert app["relay_ip"] == "10.20.0.252"          # .253 is a member's address, .254 Exoscale's DHCP
+    assert app["aliases"] == ["10.20.0.1"]           # the guests' on-prem DNS, answered by the sinkhole
+    rh.data["settings"]["front_cidr"] = "10.20.0.0/16"
+    with pytest.raises(SystemExit):
+        RH.layout(rh, {"db01": FakeSt(plan_)}, ex)
+
+
+def test_rehearsal_settings_and_relay_userdata(tmp_path):
+    import argparse
+    k = tmp_path / "k.pub"
+    k.write_text("ssh-ed25519 AAAAuser alice\n")
+    a = argparse.Namespace(access=["198.51.100.0/24"], ssh_key=[str(k)], ttl="2h", front_cidr=None,
+                           host=["db.internal=10.20.0.31"])
+    s = RH.settings_of({"access": ["203.0.113.7/32"], "hosts": {"a.internal": "10.20.0.21"}}, a)
+    assert s["access"] == ["203.0.113.7/32", "198.51.100.0/24"] and s["ttl_s"] == 7200
+    assert s["hosts"] == {"a.internal": "10.20.0.21", "db.internal": "10.20.0.31"}
+    assert s["ssh_keys"] == ["ssh-ed25519 AAAAuser alice"] and s["front_cidr"] == "100.127.0.0/24"
+    ud = RH.relay_userdata("ssh-ed25519 AAAAappliance", s["ssh_keys"])
+    import yaml
+    d = yaml.safe_load(ud)
+    assert d["users"][1]["name"] == "rehearsal" and d["users"][1]["ssh_authorized_keys"] == s["ssh_keys"]
+    files = {f["path"]: f["content"] for f in d["write_files"]}
+    assert "net.ipv4.ip_forward = 0" in files["/etc/sysctl.d/90-v2v-relay.conf"]
+    assert "policy drop" in files["/etc/nftables.conf"]
+    sshd = files["/etc/ssh/sshd_config.d/90-v2v-relay.conf"]
+    for line in ("PasswordAuthentication no", "PermitTunnel no", "GatewayPorts no", "AllowTcpForwarding local"):
+        assert line in sshd
+    assert files["/etc/ssh/sshd_config.d/91-v2v-permitopen.conf"].strip() == "PermitOpen none"
+    assert "no-resolv" in files["/etc/dnsmasq.d/v2v-relay.conf"]
+
+
+def test_relay_files_networkd_and_sinkhole():
+    class Ex:
+        def privnet(self, n):
+            return {"id": {"v2v-s-rh-front": "f", "v2v-s-rh-app": "p"}[n]}
+
+        def instance_nics(self, n):
+            return [{"network": "public", "mac": "06:00:00:00:00:01"}, {"network": "f", "mac": "0a:00:00:00:00:02"},
+                    {"network": "p", "mac": "0a:00:00:00:00:03"}]
+    rh = RH.Rehearsal("s")
+    rh.data = {"relay": {"name": "v2v-s-rh-relay"}, "settings": {"hosts": {"db.internal": "10.20.0.31"}},
+               "networks": [{"name": "v2v-s-rh-front", "role": "front", "relay_ip": "100.127.0.253", "prefix": 24, "aliases": []},
+                            {"name": "v2v-s-rh-app", "role": "private", "relay_ip": "10.20.0.252", "prefix": 24,
+                             "aliases": ["10.20.0.1"]}]}
+    f = RH.relay_files(rh, Ex())
+    nw = [v for k, v in f.items() if k.startswith("/etc/systemd/network/")]
+    assert len(nw) == 2 and all("Gateway" not in v for v in nw)           # the public NIC is left alone
+    app = next(v for v in nw if "0a:00:00:00:00:03" in v)
+    assert "Address=10.20.0.252/24" in app and "Address=10.20.0.1/24" in app
+    dns = f["/etc/dnsmasq.d/v2v-relay.conf"]
+    assert "listen-address=10.20.0.1" in dns and "address=/db.internal/10.20.0.31" in dns and "log-queries" in dns
+    assert "server=" not in dns
+
+
+def test_shadow_template_defaults():
+    assert RH.shadow_template({"receiver_mode": "template", "template": "t", "template_visibility": "private"}) == ("t", "private")
+    assert RH.shadow_template({"receiver_mode": "kexec", "os_family": "windows", "firmware": "efi"}) == \
+        ("exo-v2v-windows-uefi", "private")
+    assert RH.shadow_template({"receiver_mode": "kexec", "os_family": "linux", "firmware": "bios"}) == \
+        ("exo-v2v-linux-legacy", "private")
+
+
+def test_agent_skips_the_nocloud_drive(tmp_path, monkeypatch):
+    import agent
+    # as seen on a private instance: the NoCloud drive is vdb, 1 MiB iso9660, NOT flagged read-only
+    sysb = {"vda": ("0", 83886080, ""), "vdb": ("0", 2048, ""), "vdc": ("0", 23068672, "5e8559a9-ce53-4ef6-b")}
+    def fake_open(path, *a, **k):
+        import io
+        dev, attr = path.split("/")[3], path.split("/")[-1]
+        ro, size, serial = sysb[dev]
+        return io.StringIO({"ro": ro, "size": str(size), "serial": serial}[attr])
+    monkeypatch.setattr(agent.glob, "glob", lambda p: [f"/sys/block/{d}" for d in sysb] if p == "/sys/block/vd*" else [])
+    monkeypatch.setattr(agent, "open", fake_open, raising=False)
+    monkeypatch.setattr(agent.os.path, "exists", lambda p: p.endswith("/serial"))
+    assert agent.disks() == ["/dev/vda", "/dev/vdc"]
+    assert agent.root_disk() == "/dev/vda"

@@ -30,6 +30,14 @@
         },
         {
           "action": "allow",
+          "expression": "operation == 'create-block-storage-snapshot' && parameters.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['delete-block-storage-snapshot', 'update-block-storage-snapshot'] && resources.block_storage_snapshot.name.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
           "expression": "operation == 'attach-instance-to-private-network' && resources.private_network.name.startsWith('v2v-')"
         },
         {

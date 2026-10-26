@@ -1,6 +1,6 @@
 # Web status page
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v web` serves a read-only page with the state of every migration and
 group on the replication appliance: phases, the last cycles, cutover steps,
@@ -20,6 +20,7 @@ Run it as the user that runs the migrations (`sudo -E`, the same
 |---|---|
 | Overview | Groups (cutover state, members by tier and phase), every migration: phase, a sync or cutover running now, last cycle, public and private addresses, downtime |
 | Migration | Phase, source VM, receiver, a chart of the data copied per cycle (full, delta, final), disks and where they go, networks with the Exoscale MACs, the cutover steps with their times, plan and preflight messages, events |
+| Rehearsal | Its copies (phase, address, seed and boot times, health from the relay), its steps, networks, the names the copies tried to resolve, the TTL |
 | Group | Members by tier with their health check results, the cutover steps (preflight, warm cycle, tiers off, conversions, tiers up, hooks) with their times, networks, a member's log, events |
 
 ![The group page after a cutover: members by tier with their health checks, the cutover steps with their times, the networks](images/web-group.png)
@@ -81,3 +82,4 @@ WantedBy=multi-user.target
 | `/api/migrations/NAME` | One migration: plan, cycles, cutover steps, events |
 | `/api/groups/NAME` | One group: members, cutover, networks, events |
 | `/api/groups/NAME/log/VM?lines=N` | The last N lines (at most 2000) of a member's log |
+| `/api/rehearsals/NAME` | One rehearsal: copies, relay, networks, steps, report |

@@ -8,7 +8,7 @@ import os
 import tarfile
 
 PAYLOAD_FILES = ["agent.py", "guestfix.py", "lvmlayout.py", "nbdserve.py", "nbdproto.py", "cbtsim.py",
-                 "bootstrap-kexec.sh", "win-support.sh"]
+                 "rootcopy.py", "bootstrap-kexec.sh", "win-support.sh"]
 RECEIVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "receiver")
 
 
@@ -51,7 +51,9 @@ def agent_start_command(expected_disks):
     """Receiver template: already in RAM. Wait for the data volumes (the agent
     exports the disks it sees when it starts), then (re)start the agent."""
     return ("mkdir -p /opt/v2v-agent && tar -xzf - -C /opt/v2v-agent && "
-            f"for i in $(seq 1 90); do [ $(ls -d /sys/block/vd* | wc -l) -ge {expected_disks} ] && break; sleep 5; done && "
+            # writable disks only: an instance without a public IP also has a tiny read-only NoCloud drive
+            f"for i in $(seq 1 90); do n=0; for d in /sys/block/vd*; do [ \"$(cat $d/ro)\" = 0 ] && [ $(cat $d/size) -gt 131072 ] && n=$((n+1)); done; "
+            f"[ $n -ge {expected_disks} ] && break; sleep 5; done && "
             "systemctl restart v2v-agent")
 
 

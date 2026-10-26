@@ -33,6 +33,7 @@ nav:
       - IAM role: iam.md
       - Operations runbook: OPERATIONS.md
       - Moving an application: groups.md
+      - Rehearsal: rehearsal.md
       - Web status page: web.md
   - Reference:
       - Supported operating systems: supported-os.md

@@ -1,6 +1,6 @@
 # Prerequisites
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 Check these before your first migration. `exo-v2v plan` checks the source VM
 for you and refuses VMs it cannot migrate.
@@ -44,6 +44,7 @@ Network access from the appliance:
 | Exoscale API (`api-<zone>.exoscale.com`) | TCP 443 | Create and manage the target instance |
 | Target instances in the Exoscale zone | TCP 22 | Data stream and agent control, inside SSH |
 | `api.ipify.org` or `ifconfig.me` | TCP 443 | Detects the appliance's public address once per migration. Not needed if you pass `create --sender-cidr`. |
+| A rehearsal's relay (rehearsals only) | TCP 22 | The appliance drives the copies through it; the production receivers stream the root disks through it |
 | Group members' public IPs (groups only) | the health check ports | `group cutover` checks each tier from the appliance; the member's own security group opens those ports to the appliance only |
 
 The appliance's public address must stay the same during a migration: the

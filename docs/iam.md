@@ -1,6 +1,6 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.
@@ -19,6 +19,8 @@ limit what the key can touch.
 | Group private network | `v2v-<group>-<network>` (or a `v2v-*` network you name with `exoscale_name`) |
 | Group anti-affinity group | `v2v-<group>-<name>` |
 | Security groups a group manifest defines | `v2v-*` (or `exo-v2v-*`) |
+| Rehearsal: copies, relay, networks, its security group | `v2v-<migration>-rh`, `v2v-<name>-rh-relay`, `v2v-<name>-rh-<network>` |
+| Rehearsal: snapshots and volumes | `v2v-<volume>-rh-<time>`, `v2v-<migration>-rh-d<N>` |
 
 If you name the instance yourself with `create --instance-name`, start the name
 with `v2v-`, or the role below refuses it.
@@ -35,17 +37,19 @@ checked `parameters.labels`, while rules on names worked.
 | Rule | Allows |
 |---|---|
 | 1 | Every read operation (`get-*`, `list-*`) in Compute: zones, templates, instance types, and the state of the resources above |
-| 2 | Creating `v2v-*` instances, volumes, SSH keys, private networks and anti-affinity groups |
+| 2 | Creating `v2v-*` instances (with or without a public IP), volumes (also from a snapshot), SSH keys, private networks and anti-affinity groups |
 | 3 | Deleting `v2v-*` SSH keys |
 | 4 | Starting, stopping, scaling, resetting, renaming (`update-instance`, used by `cleanup` for a group member's final name) and deleting `v2v-*` instances. Reset: when the source system disk grows during replication, the target is re-imaged with a bigger root disk |
 | 5 | Attaching a `v2v-*` volume to a `v2v-*` instance |
 | 6 | Detaching, relabelling, resizing and deleting `v2v-*` volumes |
-| 7 | Attaching instances to `v2v-*` private networks (with a static lease) |
-| 8 | Deleting `v2v-*` private networks |
-| 9 | Deleting `v2v-*` anti-affinity groups |
-| 10 | Creating `exo-v2v-*` and `v2v-*` security groups |
-| 11 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
-| 12 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group` or in a group manifest) |
+| 7 | Snapshotting volumes into `v2v-*` snapshots (rehearsal seeding) |
+| 8 | Deleting and relabelling `v2v-*` snapshots |
+| 9 | Attaching instances to `v2v-*` private networks (with a static lease) |
+| 10 | Deleting `v2v-*` private networks |
+| 11 | Deleting `v2v-*` anti-affinity groups |
+| 12 | Creating `exo-v2v-*` and `v2v-*` security groups |
+| 13 | Adding rules to, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
+| 14 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group` or in a group manifest) |
 
 Everything else is denied, including every other Exoscale service. The
 operations in the rules are the ones exo-v2v calls through `exo` 1.103:
@@ -58,7 +62,9 @@ and `reset-instance` (a system disk that grows). 0.3.0 adds what groups need:
 `delete-private-network`, `create-anti-affinity-group`,
 `delete-anti-affinity-group`, `update-instance` (rename), and `v2v-*` security
 groups. Exoscale evaluates `attach-instance-to-private-network` against the
-private network, not the instance: a rule on the instance name never matches it.
+private network, not the instance: a rule on the instance name never matches it. 0.4.0 adds
+`create-block-storage-snapshot` (matched on the snapshot's name: the volume is not loaded for
+that operation) and `delete-block-storage-snapshot` for rehearsals.
 
 To update an existing role: `exo iam role update exo-v2v-appliance --policy - < docs/iam/exo-v2v-appliance-policy.json`.
 
@@ -85,7 +91,8 @@ and on 2026-10-23 with three group runs (5 VMs): `group create` (private
 network, anti-affinity group, security groups, receivers attached to the
 private network with static leases), the cutovers, `group rollback`,
 `group cleanup --delete-instances`, and a hand-over `group cleanup` with a
-rename. Every `exo` call was made with the role's key.
+rename. On 2026-10-23 also with rehearsals (snapshots, volumes from snapshots, instances without a
+public IP, the relay and its networks, destroy). Every `exo` call was made with the role's key.
 
 Run one migration of a small test VM with your new key too, through `cleanup
 --delete-instance`. A refused call stops exo-v2v with an error that names the

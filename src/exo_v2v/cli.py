@@ -55,7 +55,7 @@ def exo_for(st, a):
 
 
 def sender_cidr(a):
-    if a.sender_cidr:
+    if getattr(a, "sender_cidr", None):
         return a.sender_cidr
     for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
         try:
@@ -69,7 +69,8 @@ def sender_cidr(a):
 
 def tunnel_for(st):
     r = st["receiver"]
-    return Tunnel(r["ip"], st["plan"]["receiver_user"], st.key_path, os.path.join(st.dir, "known_hosts"))
+    return Tunnel(r["ip"], st["plan"]["receiver_user"], st.key_path, os.path.join(st.dir, "known_hosts"),
+                  jump=r.get("jump"))
 
 
 def mapping_of(st):
@@ -586,7 +587,7 @@ def group_guard(st, a, what):
         die(f"{st.name} is a member of group {g}: use `exo-v2v group {what} {g}`")
 
 
-def convert(st, ex, t):
+def convert(st, ex, t, extra=None):
     """Conversion on the receiver (virt-v2v-in-place, 4Kn adaptation, network
     fix-up), then the volume rebuilds and a flush. Resumes after an interruption:
     a conversion that already finished is not run again."""
@@ -602,7 +603,7 @@ def convert(st, ex, t):
                 log("converting (virt-v2v-in-place on the receiver, then 4Kn + network fix-ups)")
                 steps["convert_started"] = time.time()
                 st.save()
-                t.post("/convert", {"netmap": netmap_of(st)})
+                t.post("/convert", {"netmap": netmap_of(st), **(extra or {})})
             while (c := t.get("/convert"))["state"] == "running":
                 time.sleep(15)
         st.data["convert"] = {k: c.get(k) for k in ("state", "rc", "error", "problems", "adapt", "netfix")}
@@ -636,6 +637,10 @@ def convert(st, ex, t):
 def cmd_cutover(a):
     st = State.load(a.name)
     group_guard(st, a, "cutover")
+    from .rehearsal import active_for
+    if active_for(st.name) and not (a.allow_rehearsal or a.in_group):
+        die(f"rehearsal {active_for(st.name)} of {st.name} is up: `exo-v2v rehearsal destroy "
+            f"{active_for(st.name)}` first, or --allow-rehearsal")
     if st["phase"] not in ("syncing", "receiver-ready", "cutover", "converted"):
         die(f"phase is {st['phase']}")
     ex = exo_for(st, a)
@@ -745,12 +750,14 @@ def wait_port(host, port, timeout):
 
 
 def cmd_status(a):
-    names = [a.name] if a.name else State.all()
+    names = [a.name] if a.name else [n for n in State.all() if not State.load(n).data.get("rehearsal_of")]
     for n in names:
         st = State.load(n)
         p, r = st["plan"], st["receiver"]
         last = st["cycles"][-1] if st["cycles"] else None
         grp = f"  group={st['group']}" if st.data.get("group") else ""
+        if st.data.get("rehearsal_of"):
+            grp += f"  rehearsal copy of {st['rehearsal_of']} ({st['rehearsal']})"
         print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}) in {p['zone']}  phase={st['phase']}{grp}")
         if last:
             age = int(time.time() - last["t"])
@@ -886,6 +893,8 @@ def main(argv=None):
             s.add_argument("--boot-timeout", type=int, default=900)
             s.add_argument("--no-start", action="store_true",
                            help="stop after the conversion (the instance is started later)")
+            s.add_argument("--allow-rehearsal", action="store_true",
+                           help="cut over although a rehearsal of this migration is up")
 
     s = sub.add_parser("status"); s.add_argument("name", nargs="?"); s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(fn=cmd_status)
@@ -896,8 +905,9 @@ def main(argv=None):
     s.add_argument("--rename", metavar="NEW", help="rename the migrated instance (hand-over)")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_cleanup)
     s = sub.add_parser("list"); s.set_defaults(fn=lambda a: [print(n) for n in State.all()])
-    from . import group, web
+    from . import group, rehearsal, web
     group.add_parser(sub)
+    rehearsal.add_parser(sub)
     web.add_parser(sub)
 
     a = ap.parse_args(argv)

@@ -9,7 +9,8 @@
     GET  /status                    disks, sizes, serials, bytes written, convert state
     GET  /hashmap?export=sda&chunk=64M   per-chunk sha256 (compare with cbtsim.py hashmap)
     GET  /preflight                 4Kn compatibility of the data volumes (read-only)
-    POST /convert {"netmap": [...]} virt-v2v-in-place on all disks (nested KVM if present),
+    POST /convert {"netmap": [...], "crash_consistent": false}
+                                    virt-v2v-in-place on all disks (nested KVM if present),
                                     then 4Kn partition-table adaptation of the data
                                     volumes and the first-boot network fix (guestfix.py;
                                     netmap: [{"mac", "mode": static|dhcp, "ip", "prefix",
@@ -82,8 +83,30 @@ def serial_of(dev):
 
 
 def by_serial(serial):
-    return next((f"/dev/{os.path.basename(d)}" for d in sorted(glob.glob("/sys/block/vd*"))
-                 if serial and serial_of(d) == serial), None)
+    return next((d for d in disks() if serial and serial_of(d) == serial), None)
+
+
+def config_drive(d):
+    """A read-only or tiny disk: the NoCloud metadata drive of an instance without
+    a public IP (rehearsal copies). Never exported, never written."""
+    base = os.path.basename(d)
+    try:
+        ro = open(f"/sys/block/{base}/ro").read().strip() == "1"
+        size = int(open(f"/sys/block/{base}/size").read()) * 512
+    except (OSError, ValueError):
+        return False
+    return ro or size <= 64 << 20
+
+
+def disks():
+    """The instance's writable virtio disks (/dev/vdX), config drive excluded."""
+    return [f"/dev/{os.path.basename(d)}" for d in sorted(glob.glob("/sys/block/vd*")) if not config_drive(d)]
+
+
+def root_disk():
+    """The instance's own disk: the first disk without a serial (Block Storage
+    volumes carry theirs), normally /dev/vda."""
+    return next((d for d in disks() if not serial_of(d)), "/dev/vda")
 
 
 def discover():
@@ -92,17 +115,19 @@ def discover():
     elif os.path.exists(VOLUMES_FILE):
         # volumes by serial (Exoscale: the volume ID's first 20 characters), not by
         # device order: robust to volumes resized/added/re-attached later
-        exports = {"sda": "/dev/vda"}
+        exports = {"sda": root_disk()}
         for export, serial in json.load(open(VOLUMES_FILE)).items():
             dev = by_serial(serial)
             if not dev:
                 sys.exit(f"volume {serial} ({export}) not attached")
             exports[export] = dev
     else:
-        devs = sorted(glob.glob("/sys/block/vd*")) + sorted(glob.glob("/sys/block/sd*"))
+        root = root_disk()
+        devs = [root] + [d for d in disks() if d != root] + \
+            ["/dev/" + os.path.basename(d) for d in sorted(glob.glob("/sys/block/sd*")) if not config_drive(d)]
         exports = {}
         for i, d in enumerate(devs):
-            exports["sd" + chr(ord("a") + i)] = "/dev/" + os.path.basename(d)
+            exports["sd" + chr(ord("a") + i)] = d
     for f in folds():
         if f["export"] not in exports or exports[f["export"]].startswith("/dev/vd"):
             exports[f["export"]] = fold_loop(exports["sda"], f["offset"], f["size"])
@@ -156,7 +181,28 @@ def device_exports(exports):
     return {"sda": exports["sda"], **data_exports(exports)}
 
 
-def run_convert(exports, netmap=None):
+def ntfs_partitions(dev):
+    """NTFS partitions of a disk (the kernel's view: the system disk has 512-byte sectors)."""
+    subprocess.call(["blockdev", "--rereadpt", dev], stderr=subprocess.DEVNULL)
+    subprocess.call(["udevadm", "settle"])
+    out = subprocess.run(["lsblk", "-lnpo", "NAME,FSTYPE", dev], capture_output=True, text=True).stdout
+    return [ln.split()[0] for ln in out.splitlines() if ln.split()[1:] == ["ntfs"]]
+
+
+def ntfsfix(parts, clear_dirty):
+    """Crash-consistent copies only (rehearsals): the replica of a running Windows
+    has an unclean NTFS journal, which libguestfs mounts read-only (virt-v2v then
+    refuses). `ntfsfix -d` resets the journal and clears the dirty flag; plain
+    `ntfsfix` afterwards sets it again, so Windows checks the volume at first boot."""
+    out = []
+    for p in parts:
+        r = subprocess.run(["ntfsfix"] + (["-d"] if clear_dirty else []) + [p], capture_output=True, text=True)
+        out.append({"partition": p, "rc": r.returncode, "clear_dirty": clear_dirty,
+                    "log": (r.stdout + r.stderr).strip().splitlines()[-2:]})
+    return out
+
+
+def run_convert(exports, netmap=None, crash_consistent=False):
     STATE["convert"] = {"state": "running", "started": time.time(), "step": "virt-v2v", "problems": []}
     st = STATE["convert"]
     env = dict(os.environ, LIBGUESTFS_BACKEND="direct")
@@ -170,7 +216,12 @@ def run_convert(exports, netmap=None):
     devs = device_exports(exports)
     disks = [devs[k] for k in sorted(devs)]
     cmd = ["virt-v2v-in-place", "-v", "-x", "-i", "disk", *disks]
+    ntfs = []
     try:
+        if crash_consistent:
+            st["step"] = "ntfsfix"
+            ntfs = ntfs_partitions(exports["sda"])
+            st["ntfsfix"] = ntfsfix(ntfs, clear_dirty=True)
         fl = [f for f in folds() if f["export"] in exports]
         if fl:
             # the folded regions become partitions of the system disk BEFORE
@@ -206,6 +257,8 @@ def run_convert(exports, netmap=None):
             st["problems"] += [f"{k}: {p}" for p in r["problems"]]
         st["step"] = "netfix"
         st["netfix"] = guestfix.netfix(exports["sda"], netmap)
+        if ntfs:                                  # Windows checks them at first boot
+            st["ntfsfix"] += ntfsfix(ntfs, clear_dirty=False)
         subprocess.call(["sync"])
         st.update(state="done", step="", ended=time.time())
     except Exception as e:  # e.g. virt-v2v-in-place not installed, rc != 0
@@ -217,8 +270,7 @@ def spare_disks(exports):
     """Attached disks that are not exported (e.g. a spare volume for /relayout)."""
     used = {os.path.realpath(v) for v in exports.values()}
     out = []
-    for d in sorted(glob.glob("/sys/block/vd*")):
-        dev = "/dev/" + os.path.basename(d)
+    for dev in disks():
         if dev not in used:
             out.append(disk_info("", dev))
     return out
@@ -268,8 +320,7 @@ class Handler(BaseHTTPRequestHandler):
                         "nbd_port": NBD_PORT,
                         "disks": [disk_info(k, v) for k, v in sorted(self.exports.items())],
                         "spares": spare_disks(self.exports),
-                        "devices": [disk_info("", f"/dev/{os.path.basename(d)}")
-                                    for d in sorted(glob.glob("/sys/block/vd*"))],
+                        "devices": [disk_info("", d) for d in disks()],
                         "convert": STATE["convert"]})
         elif u.path == "/hashmap":
             dev = self.exports.get(q.get("export", "sda"))
@@ -308,7 +359,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "already running"}, 409)
             n = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(n) or b"{}") if n else {}
-            threading.Thread(target=run_convert, args=(self.exports, body.get("netmap")), daemon=True).start()
+            threading.Thread(target=run_convert, args=(self.exports, body.get("netmap"),
+                                                       bool(body.get("crash_consistent"))), daemon=True).start()
             self._json({"state": "running"}, 202)
         elif u.path == "/meta":
             # Per-export sync metadata, e.g. {"change_id": "<VMware changeId>"}.

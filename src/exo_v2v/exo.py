@@ -45,10 +45,14 @@ class Exo:
     # --- instances ---
     def instance_create(self, name, template, itype, disk_gb, security_groups, user_data, labels,
                         ssh_keys=(), secureboot=False, tpm=False, template_visibility="public",
-                        anti_affinity_groups=()):
+                        anti_affinity_groups=(), public_ip=None, private_networks=()):
         args = ["compute", "instance", "create", name, "-z", self.zone, "--template", template,
                 "--instance-type", itype, "--disk-size", str(disk_gb),
                 "--cloud-init", user_data, "--cloud-init-compress"]
+        if public_ip:                       # "none": a private instance (create-time only)
+            args += ["--public-ip", public_ip]
+        for n in private_networks:          # a private instance needs one to have any NIC
+            args += ["--private-network", n]
         for g in anti_affinity_groups:      # create-time only on Exoscale
             args += ["--anti-affinity-group", g]
         if template_visibility != "public":
@@ -120,6 +124,9 @@ class Exo:
     def instance_rename(self, name, new):
         return self.run("compute", "instance", "update", name, "-z", self.zone, "--name", new, json_out=False)
 
+    def instances(self):
+        return self.run("compute", "instance", "list", "-z", self.zone) or []
+
     def instance_delete(self, name):
         return self.run("compute", "instance", "delete", name, "-z", self.zone, "-f", json_out=False)
 
@@ -130,8 +137,10 @@ class Exo:
         return self.run("compute", "instance", "security-group", "remove", name, sg, "-z", self.zone, json_out=False)
 
     # --- block storage ---
-    def volume_create(self, name, size_gb, labels):
+    def volume_create(self, name, size_gb, labels, snapshot=None):
         args = ["compute", "block-storage", "create", name, "-z", self.zone, "--size", str(size_gb)]
+        if snapshot:
+            args += ["--snapshot", snapshot]
         for k, v in labels.items():
             args += ["--label", f"{k}={v}"]
         return self.run(*args)
@@ -153,6 +162,19 @@ class Exo:
         return self.run("compute", "block-storage", "update", name, "-z", self.zone, "--size", str(size_gb),
                         json_out=False)
 
+    def snapshot_create(self, volume, name, labels):
+        args = ["compute", "block-storage", "snapshot", "create", volume, "-z", self.zone, "--name", name]
+        for k, v in labels.items():
+            args += ["--label", f"{k}={v}"]
+        return self.run(*args)
+
+    def snapshot_delete(self, name):
+        return self.run("compute", "block-storage", "snapshot", "delete", name, "-z", self.zone, "-f",
+                        json_out=False)
+
+    def snapshots(self):
+        return self.run("compute", "block-storage", "snapshot", "list", "-z", self.zone) or []
+
     def volume_delete(self, name):
         return self.run("compute", "block-storage", "delete", name, "-z", self.zone, "-f", json_out=False)
 
@@ -166,9 +188,16 @@ class Exo:
     def privnet(self, name):
         return self.run("compute", "private-network", "show", name, "-z", self.zone)
 
-    def privnet_create(self, name, start_ip, end_ip, netmask, description="exo-v2v"):
-        return self.run("compute", "private-network", "create", name, "-z", self.zone, "--start-ip", start_ip,
-                        "--end-ip", end_ip, "--netmask", netmask, "--description", description)
+    def privnet_create(self, name, start_ip, end_ip, netmask, description="exo-v2v", dns_servers=()):
+        args = ["compute", "private-network", "create", name, "-z", self.zone, "--start-ip", start_ip,
+                "--end-ip", end_ip, "--netmask", netmask, "--description", description]
+        for d in dns_servers:               # DHCP option 6
+            args += ["--dns-server", d]
+        return self.run(*args)
+
+    def privnet_leases(self, name):
+        """{instance name: address} of a managed private network."""
+        return {x["instance"]: x["ip_address"] for x in self.privnet(name).get("leases") or []}
 
     def privnet_attach(self, instance, network, ip=None):
         args = ["compute", "instance", "private-network", "attach", instance, network, "-z", self.zone]

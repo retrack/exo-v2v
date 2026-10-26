@@ -1,6 +1,6 @@
 # Moving an application (groups)
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A group moves several VMs that work together, for example a load balancer, a
 few application servers and a database, as one unit. Every VM is replicated
@@ -37,6 +37,8 @@ exo-v2v group plan     shop -f shop.yaml         # every member's plan + the cut
 exo-v2v group create   shop                      # private networks, anti-affinity groups, receivers
 sudo -E exo-v2v group sync shop                  # a cycle on every member, in parallel
 sudo -E exo-v2v group sync shop --every 900      # keep them fresh until the window
+sudo -E exo-v2v group rehearse shop              # airgapped copies to check first (optional)
+exo-v2v rehearsal destroy shop
 sudo -E exo-v2v group cutover shop               # the window
 exo-v2v group status   shop
 sudo -E exo-v2v group rollback shop              # if needed: back on VMware
@@ -108,6 +110,11 @@ cutover:
   rollback_on_failure: false            # true: roll back on any failure
   health_timeout: 10m
   max_sync_age: 6h                      # members must have synced this recently
+
+rehearsal:                              # see Rehearsal
+  access: [203.0.113.0/24]
+  ssh_keys: [ssh-ed25519 AAAA... alice@example.com]
+  ttl: 8h
 ```
 
 | Key | Meaning |
@@ -216,4 +223,3 @@ and security groups `group create` made.
 - Members are listed by name (`--vm`); selecting by vCenter folder or tag comes later.
 - One zone per group.
 - Managed private networks only (no VPC subnets yet); no Elastic IPs.
-- No rehearsal (a test cutover on copies while the sources keep running) yet.

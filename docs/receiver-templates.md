@@ -1,6 +1,6 @@
 # Receiver templates
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A receiver template is an Exoscale template that boots straight into the
 exo-v2v receiver: a Linux system that runs entirely from RAM, so the
@@ -20,6 +20,11 @@ Exoscale does not publish receiver templates yet: build and register your own
 (below). Exoscale-published Windows variants would carry the Windows licence,
 so a migrated Windows guest would run on a Windows-licensed instance. Until
 then, contact Exoscale about licensing before migrating Windows guests.
+
+Templates built before exo-v2v 0.4.0 cannot serve a [rehearsal](rehearsal.md): a copy has no
+public IP, and Exoscale then delivers the instance's metadata (the migration's SSH key) on a small
+read-only NoCloud drive instead of the metadata server; 0.4.0 templates read either. Rebuild them
+to rehearse.
 
 Templates built before exo-v2v 0.2.0 lack `dmsetup`, which 0.2.0 uses to
 rebuild LVM logical volumes. Such a receiver installs it when it needs it, which

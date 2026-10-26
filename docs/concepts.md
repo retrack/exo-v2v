@@ -1,6 +1,6 @@
 # How exo-v2v works
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v moves a running VMware vSphere virtual machine to an Exoscale Compute
 instance. The VM keeps running while its disks are copied. It is stopped only
@@ -124,6 +124,14 @@ hooks), private networks that keep the VMs' addresses, and a coordinated
 cutover: the tiers stop front to back, every member converts in parallel, and
 the tiers start back to front, each after the previous one passes its health
 checks. `group rollback` brings the whole application back on VMware.
+
+## Rehearsals
+
+A [rehearsal](rehearsal.md) starts copies of the replicated VMs, converted as
+the cutover would convert them, on isolated networks without a public IP or a
+router, reachable only by SSH through a relay. It checks the application before
+the window without touching the sources, the replication or anything the
+application talks to in production.
 
 ## Security model
 

@@ -42,6 +42,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .p-cutover, .p-converted, .p-running { color: var(--amber); }
 .p-done { color: var(--green); }
 .p-rolled-back, .p-failed, .p-missing { color: var(--red); }
+.p-building, .p-destroying { color: var(--amber); } .p-ready { color: var(--green); }
+.airgap { font-size: 12px; color: var(--muted); border-left: 3px solid var(--teal); padding: 6px 10px; background: var(--soft); border-radius: 0 6px 6px 0; margin-top: 8px; }
 .busy { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--amber); }
 .busy::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
@@ -141,9 +143,54 @@ function viewOverview(d) {
     + (showCleaned ? cleaned.map(row).join("") : "");
   return `<h1>Migrations on ${esc(d.host)}</h1><div class="crumbs">${esc(d.home)} · refreshed every 5 s</div>
     <h2>Groups</h2>${groups ? `<div class="cards">${groups}</div>` : '<div class="panel empty">no groups</div>'}
+    ${(d.rehearsals || []).length ? `<h2>Rehearsals</h2><div class="cards">${d.rehearsals.map(rehearsalCard).join("")}</div>` : ""}
     <h2>Migrations</h2>${rows ? `<div class="panel scroll"><table><thead><tr><th>Migration</th><th class="hide-s">Group</th><th>Phase</th>
     <th>Last cycle</th><th class="hide-s">Public / private IP</th><th class="num">Downtime</th></tr></thead><tbody>${rows}</tbody></table></div>`
     : '<div class="panel empty">no migrations yet (<span class="mono">exo-v2v plan</span>)</div>'}`;
+}
+
+// ---------- rehearsal ----------
+function ttlLeft(r) {
+  if (!r.ttl_s || !r.created) return "";
+  const left = r.created + r.ttl_s - Date.now() / 1000;
+  return left > 0 ? `destroyed in ${dur(left)}` : "past its TTL";
+}
+function rehearsalCard(r) {
+  return `<div class="card"><div class="t"><a href="#/r/${enc(r.name)}">${esc(r.name)}</a>${badge(r.state, "rehearsal " + r.state)}</div>
+    <dl class="kv"><dt>relay</dt><dd class="mono">${esc(r.relay || "–")}</dd><dt>copies</dt><dd>${r.copies.length}</dd>
+    <dt>age</dt><dd>${ago(r.created)}${r.ttl ? ` · ${esc(ttlLeft(r))}` : ""}</dd>${r.busy ? `<dt>now</dt><dd>${busy(r.busy)}</dd>` : ""}</dl>
+    <div class="chips">${r.copies.map(c => `<span class="chip p-${c.health ? (c.health.ok ? "done" : "failed") : esc(c.phase || "planned")}">${esc(c.vm)}</span>`).join("")}</div></div>`;
+}
+function viewRehearsal(r) {
+  const order = ["preflight", "networks", "relay", "shadows", "airgap", "seeded", "converted"]
+    .concat([...new Set(r.copies.map(c => c.tier))].sort((a, b) => a - b).map(t => `tier${t}_up`));
+  const names = {preflight: "preflight", networks: "isolated networks", relay: "relay (SSH only, no forwarding)",
+    shadows: "copies' receivers (no public IP)", airgap: "airgap check", seeded: "seeded from the replicas",
+    converted: "converted"};
+  const st = r.steps || {}, t0 = r.created;
+  let cur = false;
+  const steps = order.map(k => { let cls = st[k] ? "on" : ""; if (!st[k] && !cur && r.state === "building") { cls = "cur"; cur = true; }
+    return `<li><span class="dot ${cls}"></span><span>${esc(names[k] || k.replace(/^tier(\d+)_up$/, "tier $1 up"))}</span><span class="muted mono">${st[k] ? "+" + dur(st[k] - t0) : ""}</span></li>`; }).join("");
+  const rep = r.report || {};
+  const copies = r.copies.map(c => `<tr><td>${esc(c.tier)}</td><td>${c.name ? `<a href="#/m/${enc(c.name)}">${esc(c.vm)}</a>` : esc(c.vm)}</td>
+    <td>${badge(c.phase || "planned")} ${busy(c.busy)}</td><td class="mono">${esc(c.address || "–")}${(c.private_ips || []).length ? `<div class="muted">${c.private_ips.map(esc).join(" ")}</div>` : ""}</td>
+    <td class="num">${c.seed ? dur(c.seed.seconds) : "–"}</td><td class="num">${c.boot_s != null ? dur(c.boot_s) : "–"}</td>
+    <td class="${c.health && !c.health.ok ? "err" : ""}" title="${c.health ? esc(c.health.detail) : ""}">${c.health ? (c.health.ok ? "ok" : "failed") : "–"}</td></tr>`).join("");
+  const dns = Object.entries(rep.dns || {}).map(([n, who]) => `<tr><td class="mono">${esc(n)}</td><td>${who.map(esc).join(", ")}</td></tr>`).join("");
+  const nets = (r.networks || []).map(n => `<tr><td class="mono">${esc(n.name)}</td><td>${esc(n.role)}</td><td class="mono">${esc(n.cidr)}</td><td class="mono">${esc(n.relay_ip)}${(n.aliases || []).length ? " + " + n.aliases.map(esc).join(" ") : ""}</td></tr>`).join("");
+  const ev = (r.events || []).slice().reverse().map(e => `<div><time>${esc(clock(e.t))}</time>${esc(e.msg)}</div>`).join("");
+  return `<div class="crumbs"><a href="#/">overview</a> · rehearsal</div>
+    <h1>${esc(r.name)} ${badge(r.state, "rehearsal " + r.state)} ${busy(r.busy)}</h1>
+    <div class="crumbs">relay <span class="mono">${esc(r.relay || "–")}</span> · ${ago(r.created)}${r.ttl ? " · " + esc(ttlLeft(r)) : ""}</div>
+    <div class="airgap">The copies have no public IP and sit on isolated networks without a router: they reach nothing outside the rehearsal. People reach them through the relay only (SSH from ${(r.access || []).length ? r.access.map(esc).join(", ") + " and " : ""}the appliance): <span class="mono">exo-v2v rehearsal connect ${esc(r.name)}</span></div>
+    ${r.error ? `<div class="panel pad err" style="margin-top:12px">${esc(r.error)}</div>` : ""}
+    <div class="grid2" style="margin-top:14px">
+      <div><h2 style="margin-top:0">Copies</h2><div class="panel scroll"><table><thead><tr><th>Tier</th><th>VM</th><th>Phase</th><th>Address</th><th class="num">Seed</th><th class="num">Boot</th><th>Health</th></tr></thead><tbody>${copies}</tbody></table></div>
+        ${rep.predicted_window_s ? `<div class="panel pad" style="margin-top:12px">Predicted cutover window: <b>~${Math.round(rep.predicted_window_s / 60)} min</b> <span class="muted">(last delta + measured conversion + boots per tier)</span></div>` : ""}
+        <h2>Names the copies tried to resolve</h2>${dns ? `<div class="panel scroll"><table><thead><tr><th>Name</th><th>From</th></tr></thead><tbody>${dns}</tbody></table></div>` : '<div class="panel empty">none logged yet (exo-v2v rehearsal report refreshes this)</div>'}</div>
+      <div><h2 style="margin-top:0">Steps</h2><div class="panel pad"><ul class="timeline">${steps}</ul></div>
+        <h2>Networks</h2><div class="panel scroll"><table><thead><tr><th>Network</th><th>Role</th><th>CIDR</th><th>Relay</th></tr></thead><tbody>${nets}</tbody></table></div></div></div>
+    <h2>Events</h2><div class="panel pad events">${ev || '<span class="muted">none</span>'}</div>`;
 }
 
 // ---------- migration ----------
@@ -250,6 +297,7 @@ function viewGroup(g) {
   const ls = g.last_sync;
   return `<div class="crumbs"><a href="#/">overview</a> · group</div>
     <h1>${esc(g.name)} ${cut.state ? badge(cut.state, "cutover " + cut.state) : badge("idle", "not cut over")} ${busy(g.busy)}</h1>
+    ${g.rehearsal ? `<div class="airgap">Rehearsal ${badge(g.rehearsal.state)}: <a href="#/r/${enc(g.rehearsal.name)}">airgapped copies</a> through relay <span class="mono">${esc(g.rehearsal.relay || "–")}</span> · ${esc(ttlLeft(g.rehearsal))}</div>` : ""}
     <div class="crumbs">${esc(g.zone)} · ${g.members.length} members${ls ? ` · last sync round ${ago(ls.t)} (${dur(ls.seconds)}${Object.keys(ls.failed || {}).length ? `, <span class="err">failed: ${esc(Object.keys(ls.failed).join(", "))}</span>` : ""})` : ""}</div>
     ${cut.error ? `<div class="panel pad err" style="margin-top:12px">${esc(cut.error)}</div>` : ""}
     <div class="grid2" style="margin-top:14px">
@@ -286,6 +334,7 @@ async function refresh() {
     const y = window.scrollY;
     if (h[0] === "m" && h[1]) app.innerHTML = viewMigration(await api(`/api/migrations/${enc(h[1])}`));
     else if (h[0] === "g" && h[1]) { app.innerHTML = viewGroup(await api(`/api/groups/${enc(h[1])}`)); await loadLog(h[1]); }
+    else if (h[0] === "r" && h[1]) app.innerHTML = viewRehearsal(await api(`/api/rehearsals/${enc(h[1])}`));
     else app.innerHTML = viewOverview(o);
     const tc = document.getElementById("togglecleaned");
     if (tc) tc.onclick = e => { e.preventDefault(); showCleaned = !showCleaned; refresh(); };

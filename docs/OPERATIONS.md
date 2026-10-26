@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.3.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.4.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -53,6 +53,15 @@ Before the window: lower the TTL of the DNS names that will move (the load
 balancer's new address is its receiver's IP, shown by `group status`), and
 check that `group sync` ran recently (`cutover.max_sync_age`).
 
+### A rehearsal
+
+| Step | Command |
+|---|---|
+| Start | `sudo -E exo-v2v group rehearse NAME` (or `exo-v2v rehearse MIGRATION --tcp 22`) |
+| Look | `exo-v2v rehearsal connect NAME` (SSH config through the relay), `--forward VM:PORT` |
+| Report | `exo-v2v rehearsal report NAME`: times, predicted window, names the copies tried to resolve |
+| Throw away | `exo-v2v rehearsal destroy NAME` (or `exo-v2v gc` from cron after the TTL) |
+
 ## 3. Rollback
 
 Before cleanup the source VM is intact (only its CBT setting was enabled):
@@ -80,6 +89,9 @@ the sources on, back end first. Members that were not converted yet keep syncing
 | `sync`: `disk(s) … removed from VM` | The copy no longer matches the VM. `cleanup --delete-instance`, then plan and create again. |
 | Windows: a dynamic or Storage Spaces volume is missing after cutover | Not supported on data disks (preflight reports it). Roll back, convert the disks to basic (copy spanned/striped volumes to basic ones), migrate again. |
 | Windows: D: (data) missing after cutover | First boot runs several driver-install reboots (5–10 min) before the `exo-v2v-online-disks` scheduled task onlines the disks; check `C:\ProgramData\exo-v2v\online-disks.log` and `C:\Program Files\Guestfs\Firstboot\log.txt`. Manually: `Set-Disk -Number 1 -IsOffline $false`. |
+| Rehearsal: `receiver template ... not found: rehearsal copies need one` | Build and register [receiver templates](receiver-templates.md) (0.4 or later) |
+| Rehearsal: a copy's receiver never answers through the relay | A template older than 0.4 (it waits for the metadata server and never gets its key): rebuild the templates |
+| `rehearsal ... is up` when cutting over | Destroy the rehearsal first (`exo-v2v rehearsal destroy NAME`) or pass `--allow-rehearsal` |
 | `cutover` interrupted (appliance reboot, lost session) | Run `cutover NAME` again: it records its steps and resumes (it does not convert twice). A group: `group cutover NAME` again; member cutovers still running are waited for |
 | `group cutover`: `preflight: ... last cycle ... ago` | Run `group sync` first, or raise `cutover.max_sync_age` |
 | `group cutover` stopped on a member | `group status NAME` and the member's log in `~/.exo-v2v/groups/NAME/logs/`. Fix, then `group cutover NAME` again (it resumes), or `group rollback NAME` |

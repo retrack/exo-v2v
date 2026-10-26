@@ -4,13 +4,17 @@ in the instance's #cloud-config user-data into ~USER/.ssh/authorized_keys.
 
 The receiver template runs no cloud-init (its root filesystem lives in RAM and
 must not touch the disk): this is the one thing it needs from user-data.
-Exoscale serves user-data on the link-local metadata server; `exo` may have
-gzip-compressed it (--cloud-init-compress)."""
+Exoscale serves user-data on the link-local metadata server, or, to instances
+without a public IP (rehearsal copies), on a small read-only NoCloud drive;
+`exo` may have gzip-compressed it (--cloud-init-compress)."""
+import glob
 import gzip
 import os
 import pwd
 import re
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -18,8 +22,39 @@ URLS = ["http://169.254.169.254/latest/user-data", "http://169.254.169.254/1.0/u
 KEY = re.compile(r"^\s*-\s*['\"]?((?:ssh-|ecdsa-|sk-)[^'\"\s]+\s+[A-Za-z0-9+/=]+(?:\s+[^'\"]*)?)['\"]?\s*$")
 
 
+def nocloud():
+    """user-data from a NoCloud drive (label cidata, or any tiny disk that has it)."""
+    cands = [os.path.realpath(f"/dev/disk/by-label/{lb}") for lb in ("cidata", "CIDATA")
+             if os.path.exists(f"/dev/disk/by-label/{lb}")]
+    for d in sorted(glob.glob("/sys/block/*")):
+        name = os.path.basename(d)
+        try:
+            size = int(open(f"{d}/size").read()) * 512
+        except (OSError, ValueError):
+            continue
+        if not name.startswith(("loop", "ram", "zram")) and 0 < size <= 64 << 20:
+            cands.append(f"/dev/{name}")
+    if cands:
+        subprocess.call(["modprobe", "-a", "isofs", "vfat"], stderr=subprocess.DEVNULL)
+    for dev in dict.fromkeys(cands):
+        with tempfile.TemporaryDirectory() as mnt:
+            if subprocess.call(["mount", "-o", "ro", dev, mnt], stderr=subprocess.DEVNULL) != 0:
+                continue
+            try:
+                print(f"v2v-userdata-key: NoCloud drive {dev}: {sorted(os.listdir(mnt))}", flush=True)
+                for f in ("user-data", "USER-DATA"):
+                    if os.path.exists(os.path.join(mnt, f)):
+                        return open(os.path.join(mnt, f), "rb").read()
+            finally:
+                subprocess.call(["umount", mnt])
+    return None
+
+
 def fetch():
     for _ in range(60):                       # metadata answers once DHCP is up
+        data = nocloud()
+        if data is not None:
+            return (gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data).decode("utf-8", "replace")
         for url in URLS:
             try:
                 with urllib.request.urlopen(url, timeout=5) as r:

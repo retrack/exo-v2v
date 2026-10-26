@@ -4,6 +4,7 @@ The receiver's agent listens on localhost only; the tunnel is the sole data
 and control path (encrypted, authenticated with the per-migration key).
 """
 import json
+import shlex
 import socket
 import subprocess
 import time
@@ -20,9 +21,15 @@ def free_port():
         return s.getsockname()[1]
 
 
+CIPHERS = "aes128-gcm@openssh.com,aes256-gcm@openssh.com,chacha20-poly1305@openssh.com"   # AES-NI first
+
+
 class Tunnel:
-    def __init__(self, host, user, key, known_hosts):
+    def __init__(self, host, user, key, known_hosts, jump=None):
+        """jump: {"host", "user", "key", "known_hosts"} of a relay to go through
+        (rehearsal copies have no public IP)."""
         self.host, self.user, self.key, self.known_hosts = host, user, key, known_hosts
+        self.jump = jump
         self.proc = None
         self.nbd_port = self.api_port = None
 
@@ -35,10 +42,19 @@ class Tunnel:
         return f"127.0.0.1:{self.nbd_port}"
 
     def ssh_base(self):
-        return ["ssh", "-i", self.key, "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+        base = ["ssh", "-i", self.key, "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
                 "-o", "StrictHostKeyChecking=accept-new", "-o", f"UserKnownHostsFile={self.known_hosts}",
                 "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-o", "ConnectTimeout=15",
-                "-o", "BatchMode=yes", "-o", "LogLevel=ERROR"]
+                "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", f"Ciphers={CIPHERS}"]
+        if self.jump:
+            # ProxyCommand, not -J: -J would not carry these options to the relay hop
+            j = self.jump
+            base += ["-o", "ProxyCommand=" + " ".join(shlex.quote(x) for x in [
+                "ssh", "-i", j["key"], "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+                "-o", "StrictHostKeyChecking=accept-new", "-o", f"UserKnownHostsFile={j['known_hosts']}",
+                "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=15",
+                "-o", f"Ciphers={CIPHERS}", "-W", "%h:%p", f"{j['user']}@{j['host']}"])]
+        return base
 
     def start(self, timeout=60):
         self.nbd_port, self.api_port = free_port(), free_port()
