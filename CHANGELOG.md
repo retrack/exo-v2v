@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Trademarks and licences**: a `NOTICE` file (shipped in the wheel too), a
+  [docs page](docs/legal.md), the docs site footer and the README say that the
+  VMware product names are trademarks of Broadcom, that exo-v2v is not
+  affiliated with Broadcom and contains no VMware software, that users need
+  their own VMware licences and stay responsible for the licences of the
+  systems they migrate, and that exo-v2v comes without warranty.
+
 ## 0.5.0 — 2026-10-26
 
 - **vCenter** (tested against govmomi's vcsim; vMotion, Storage vMotion, DRS and

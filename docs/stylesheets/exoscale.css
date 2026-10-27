@@ -27,3 +27,4 @@
 .md-typeset blockquote { border-left: 3px solid #da291c; color: #212121; background: rgba(218, 41, 28, 0.04); padding: 0.4em 0.9em; }
 .md-typeset img[src$=".svg"] { display: block; margin: 1.2em 0; border: 1px solid rgba(33, 33, 33, 0.08); border-radius: 6px; }
 .md-footer { background-color: #212121; }
+.md-copyright__highlight a { text-decoration: underline; }

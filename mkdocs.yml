@@ -4,7 +4,11 @@ site_url: https://retrack.github.io/exo-v2v/
 repo_url: https://github.com/retrack/exo-v2v
 repo_name: retrack/exo-v2v
 edit_uri: ""
-copyright: exo-v2v is licensed under the Apache License 2.0
+copyright: >-
+  exo-v2v is licensed under the Apache License 2.0 and provided "as is", without warranty.
+  VMware, vSphere, vCenter and ESXi are trademarks or registered trademarks of Broadcom Inc.
+  and/or its subsidiaries; exo-v2v is not affiliated with or endorsed by Broadcom.
+  <a href="https://retrack.github.io/exo-v2v/legal/">Trademarks and licences</a>
 
 theme:
   name: material
@@ -41,6 +45,7 @@ nav:
       - Limitations: limitations.md
       - Architecture: ARCHITECTURE.md
       - Project status: status.md
+      - Trademarks and licences: legal.md
 
 exclude_docs: |
   diagrams/generate.py

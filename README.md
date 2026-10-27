@@ -170,6 +170,14 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 The complete list is in [Limitations](docs/limitations.md). See the
 [operations runbook](docs/OPERATIONS.md) for troubleshooting.
 
-## License
+## License and trademarks
 
-Apache License 2.0, the license of the [Exoscale CLI](https://github.com/exoscale/cli). See [LICENSE](LICENSE).
+Apache License 2.0, the license of the [Exoscale CLI](https://github.com/exoscale/cli). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+exo-v2v is provided "as is", without warranties or conditions of any kind.
+
+VMware, vSphere, vCenter, ESXi and the other VMware product names are trademarks or registered
+trademarks of Broadcom Inc. and/or its subsidiaries in the United States and other countries.
+exo-v2v is not affiliated with, sponsored, endorsed or supported by Broadcom or VMware. It contains
+no VMware software (it uses the public vSphere APIs through pyVmomi), and you need your own valid
+licences for the VMware products you migrate from. All other trademarks are the property of their
+respective owners. See [Trademarks and licences](docs/legal.md).

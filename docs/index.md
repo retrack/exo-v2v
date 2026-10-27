@@ -95,5 +95,8 @@ Before the window, `sudo -E exo-v2v group rehearse shop` starts airgapped copies
 ([Rehearsal](rehearsal.md)). See [Moving an application](groups.md). `sudo -E exo-v2v web` shows every
 migration and group on a [read-only page](web.md).
 
-exo-v2v is licensed under the Apache License 2.0. Source:
-[github.com/retrack/exo-v2v](https://github.com/retrack/exo-v2v).
+exo-v2v is licensed under the Apache License 2.0 and comes without warranty.
+Source: [github.com/retrack/exo-v2v](https://github.com/retrack/exo-v2v).
+VMware and the VMware product names are trademarks of Broadcom Inc. and/or its
+subsidiaries; exo-v2v is not affiliated with Broadcom (see
+[Trademarks and licences](legal.md)).
