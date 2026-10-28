@@ -1,0 +1,30 @@
+/* Exoscale colours: ink #212121 on paper #fafafa, red #da291c as the accent. */
+:root, [data-md-color-scheme="default"] {
+  --md-primary-fg-color: #ffffff;          /* header background */
+  --md-primary-fg-color--light: #ffffff;
+  --md-primary-fg-color--dark: #f2f2f2;
+  --md-primary-bg-color: #212121;          /* header text */
+  --md-primary-bg-color--light: #616161;
+  --md-accent-fg-color: #da291c;
+  --md-accent-fg-color--transparent: rgba(218, 41, 28, 0.08);
+  --md-default-bg-color: #fafafa;
+  --md-default-fg-color: #212121;
+  --md-default-fg-color--light: #616161;
+  --md-typeset-color: #212121;
+  --md-typeset-a-color: #b3221a;           /* red, darkened for 5:1 contrast on paper */
+  --md-code-bg-color: #f2f2f2;
+  --md-text-font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --md-code-font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.md-header { border-bottom: 3px solid #da291c; box-shadow: none; }
+.md-tabs { background-color: #ffffff; color: #212121; }
+.md-banner { background-color: #212121; color: #fafafa; font-size: 0.7rem; }
+.md-banner strong { color: #ff8a80; }
+.md-typeset h1 { font-weight: 700; color: #212121; letter-spacing: -0.01em; }
+.md-typeset h2 { font-weight: 600; border-bottom: 1px solid rgba(33, 33, 33, 0.10); padding-bottom: 0.2em; }
+.md-typeset table:not([class]) { font-size: 0.72rem; border: 1px solid rgba(33, 33, 33, 0.10); }
+.md-typeset table:not([class]) th { background-color: #f2f2f2; color: #212121; }
+.md-typeset blockquote { border-left: 3px solid #da291c; color: #212121; background: rgba(218, 41, 28, 0.04); padding: 0.4em 0.9em; }
+.md-typeset img[src$=".svg"] { display: block; margin: 1.2em 0; border: 1px solid rgba(33, 33, 33, 0.08); border-radius: 6px; }
+.md-footer { background-color: #212121; }
+.md-copyright__highlight a { text-decoration: underline; }

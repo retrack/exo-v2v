@@ -1,0 +1,1558 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/ARCHITECTURE/">
+      
+      
+        <link rel="prev" href="../limitations/">
+      
+      
+        <link rel="next" href="../status/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Architecture - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#exo-v2v-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vcenter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    vCenter
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rehearsal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Rehearsal
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../public/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Public IPs and DNS
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions, API and MCP
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Components
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-target-instance-is-the-receiver" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the target instance is the receiver
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data path
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replication-without-vddk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Replication without VDDK
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Replication without VDDK">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disks-changing-between-cycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      Disks changing between cycles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#folded-disks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Folded disks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cutover-and-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cutover and conversion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4kn-block-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      4Kn Block Storage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-fix-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network fix-up
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Groups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rehearsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rehearsal
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vcenter" class="md-nav__link">
+    <span class="md-ellipsis">
+      vCenter
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unattended-replication-and-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Unattended replication and alerts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web-status-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      Web status page
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Project status
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../legal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Trademarks and licences
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Components
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-target-instance-is-the-receiver" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the target instance is the receiver
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data path
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replication-without-vddk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Replication without VDDK
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Replication without VDDK">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disks-changing-between-cycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      Disks changing between cycles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#folded-disks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Folded disks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cutover-and-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cutover and conversion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4kn-block-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      4Kn Block Storage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-fix-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network fix-up
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Groups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rehearsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rehearsal
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vcenter" class="md-nav__link">
+    <span class="md-ellipsis">
+      vCenter
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unattended-replication-and-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Unattended replication and alerts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web-status-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      Web status page
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="exo-v2v-architecture">exo-v2v architecture<a class="headerlink" href="#exo-v2v-architecture" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<h2 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Runs on</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CLI / orchestrator</td>
+<td>replication appliance (Linux VM in vSphere)</td>
+<td><code>exo_v2v/cli.py</code>, <code>plan.py</code>, <code>state.py</code>, <code>exo.py</code>, <code>tunnel.py</code></td>
+</tr>
+<tr>
+<td>Group orchestrator</td>
+<td>appliance; members run as child processes</td>
+<td><code>exo_v2v/group.py</code></td>
+</tr>
+<tr>
+<td>Web status page (read-only)</td>
+<td>appliance</td>
+<td><code>exo_v2v/web.py</code>, <code>web.html</code></td>
+</tr>
+<tr>
+<td>Rehearsal (airgapped copies)</td>
+<td>appliance; a relay instance; the copies' receivers</td>
+<td><code>exo_v2v/rehearsal.py</code>, <code>receiver/rootcopy.py</code></td>
+</tr>
+<tr>
+<td>vSphere replication (sender)</td>
+<td>appliance, as root</td>
+<td><code>exo_v2v/vsphere.py</code></td>
+</tr>
+<tr>
+<td>Receiver agent</td>
+<td>the target Exoscale instance, booted <strong>from RAM</strong></td>
+<td><code>exo_v2v/receiver/agent.py</code>, <code>nbdserve.py</code>, <code>guestfix.py</code></td>
+</tr>
+<tr>
+<td>Receiver bootstrap (stock template)</td>
+<td>target instance, first boot</td>
+<td><code>receiver/bootstrap-kexec.sh</code>; <code>userdata.py</code> (key-only user-data, payload tarball)</td>
+</tr>
+<tr>
+<td>Receiver template image</td>
+<td>built once, registered as an Exoscale template</td>
+<td><code>template/build-image.sh</code>, <code>template/v2v-userdata-key</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="why-the-target-instance-is-the-receiver">Why the target instance is the receiver<a class="headerlink" href="#why-the-target-instance-is-the-receiver" title="Permanent link">&para;</a></h2>
+<p>There is no staging copy: the bytes land on the disks that will run the
+workload. The instance keeps its boot mode (and Secure Boot / TPM, set with
+<code>--secureboot</code> / <code>--tpm</code> from the source's settings) for life, so it is created
+in the source's firmware mode. Its receiver system must run from RAM, so that
+<code>/dev/vda</code> can be overwritten. There are two ways to get there.</p>
+<p><strong>Receiver template</strong> (<code>plan --receiver-template</code>, see
+<a href="../receiver-templates/">receiver-templates.md</a>). The template's disk holds a
+BIOS boot partition and an EFI system partition; Canonical-signed shim and GRUB
+load the kernel and a ~220 MB initramfs that <em>is</em> the root filesystem
+(mmdebstrap Ubuntu 24.04 with virt-v2v, libguestfs, QEMU, filesystem tools).
+At boot, <code>v2v-userdata-key</code> installs the SSH key from the instance user-data for
+user <code>v2v</code>, <code>v2v-hostkeys</code> generates host keys, and on the Windows variant
+<code>v2v-winsupport</code> copies virtio-win and rhsrvany from the EFI partition into RAM
+(kept out of the initramfs: GRUB loading 400+ MB through firmware I/O did not
+always finish). <code>create</code> waits for SSH before attaching volumes (a disk
+hot-plugged while the firmware loads the initramfs can hang the boot), then
+streams the agent and restarts <code>v2v-agent</code>.</p>
+<p><strong>Stock template</strong> (default). The instance is created from Debian 13 (BIOS) or
+Ubuntu 24.04 (UEFI). Cloud-init only installs the migration's SSH key;
+<code>exo-v2v create</code> then streams the agent payload (tar.gz) over SSH and starts the
+bootstrap detached (Exoscale caps user-data at 32 KiB base64, which the payload
+outgrew). The bootstrap waits for cloud-init and the dpkg lock, installs
+<code>virt-v2v</code>/libguestfs/xfsprogs, copies the running OS into a RAM
+filesystem, packs it as an initramfs and <code>kexec</code>s into it with the same kernel.
+From then on nothing uses <code>/dev/vda</code> or the volumes: the agent exports them
+over NBD on <code>127.0.0.1</code> only.</p>
+<p>A receiver that restarts during the sync window must not boot the replica on
+its disk: that would be an unconverted copy of the source VM, running next to
+the source on the receiver's public IP, writing to its volumes behind the change
+tracking. Since 0.4.1:</p>
+<ul>
+<li><strong>Boot mask.</strong> The agent keeps the first and the last MiB of the system disk
+  (MBR or GPT, boot loader, backup GPT) off the disk: NBD writes there go to
+  side files in RAM (<code>/run/exo-v2v/mask</code>), reads return them, and the disk holds
+  zeros, so the firmware finds nothing to boot. The conversion writes the side
+  files to the disk first, once (a flag file stops a second conversion from
+  undoing what the first wrote). <code>/hashmap</code>, <code>cutover --verify</code> and the
+  rehearsal's root copy read through the mask. A receiver created by an older
+  version gets the new agent in place at its next <code>sync</code> (same boot, change IDs
+  kept); the mask then starts from the boot sectors on its disk.</li>
+<li><strong>No egress.</strong> A template receiver's security group gets one egress rule that
+  matches nothing (Exoscale turns egress into an allowlist at the first rule;
+  replies to the appliance's SSH are stateful; the metadata server stays
+  reachable). The cutover removes it before it stops the source; a rehearsal
+  allows SSH to its relay for the seed.</li>
+<li><strong>Change IDs on the appliance.</strong> After every cycle the appliance saves each
+  export's change ID with the receiver's boot ID and the mask state. An agent
+  that restarts in the same boot gets them back (no full cycle); <code>sync</code> tells a
+  receiver that stopped answering (restarted: nothing boots), stopped, or booted
+  its disk (a receiver without the mask: <code>sync</code> stops it) and points to
+  <code>exo-v2v recover</code>, which resets the root disk to the receiver template (stop,
+  detach the volumes, reset, start, reattach) and restores the volumes' change
+  IDs when the mask was on: only the system disk is copied again.</li>
+</ul>
+<h2 id="data-path">Data path<a class="headerlink" href="#data-path" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>appliance                                              receiver (RAM root)
+vsphere.sync ─ NBD client ─ ssh -L ─ (TCP 22) ─ sshd ─ nbdserve 127.0.0.1:10809 ─ /dev/vdX
+cli          ─ HTTP       ─ ssh -L ─ (TCP 22) ─ sshd ─ agent API 127.0.0.1:8787
+</code></pre></div>
+<ul>
+<li><strong>Authentication</strong>: a per-migration ed25519 key, injected through cloud-init
+  user-data; a per-migration security group opens TCP 22 to the appliance's
+  egress address only. No other port is exposed during the sync window.</li>
+<li><strong>NBD</strong>: fixed-newstyle, simple replies, 32 MiB max payload, WRITE_ZEROES
+  implemented with <code>BLKZEROOUT</code> (offloadable) instead of writing zeros.</li>
+</ul>
+<h2 id="replication-without-vddk">Replication without VDDK<a class="headerlink" href="#replication-without-vddk" title="Permanent link">&para;</a></h2>
+<p>Per cycle and per disk:</p>
+<ol>
+<li><code>CreateSnapshot</code> (no memory, no quiesce) → the snapshot's disk backing is
+   the frozen base <code>.vmdk</code> + its CBT <code>changeId</code>.</li>
+<li><code>QueryChangedDiskAreas(snapshot, disk, changeId)</code>; <code>"*"</code> on the first cycle
+   (allocated areas; the rest is zeroed on the target).</li>
+<li><strong>Hot-add</strong>: <code>ReconfigVM</code> on the appliance adds the base <code>.vmdk</code> as
+   <code>independent_nonpersistent</code> — the source is opened read-only, appliance
+   writes would go to a throw-away redo log. The block device is located by
+   SCSI target = unit number and size; ranges are read with <code>pread</code>
+   (parallel workers) and written to NBD; zero chunks become WRITE_ZEROES.</li>
+<li>Detach (no file operation — never deletes), <code>POST /meta {change_id}</code> on
+   the receiver, <code>RemoveSnapshot</code>.</li>
+</ol>
+<p>A VM on a chain of snapshot deltas needs nothing special: the snapshot's
+backing is the top of the chain, and hot-add opens the whole chain read-only.
+A <code>changeId</code> that vSphere no longer accepts (a snapshot revert resets CBT: new
+change-tracking UUID, the old IDs raise <code>FileFault</code>) makes that disk's cycle a
+copy of its allocated areas (<code>"*"</code>), the rest zeroed.</p>
+<h3 id="disks-changing-between-cycles">Disks changing between cycles<a class="headerlink" href="#disks-changing-between-cycles" title="Permanent link">&para;</a></h3>
+<p><code>reconcile_disks</code> compares the VM's disks with the plan before every cycle
+(and before the cutover's downtime):</p>
+<ul>
+<li><strong>grown Block Storage disk</strong>: detach, <code>update --size</code> (Exoscale resizes
+  detached volumes only), attach, find the device by serial, <code>POST /exports</code>
+  (the NBD server restarts with the new device; the export's change ID is
+  dropped, so the next cycle copies it whole);</li>
+<li><strong>grown system disk or folded disk</strong> beyond the root disk: the receiver is
+  rebuilt with <code>reset-instance</code> (stop, re-image the root disk from the template
+  at the new size, start, agent again). Volumes are detached first and their
+  change IDs saved and restored, so only the root disk is copied again. The
+  state records <code>rebuild_pending</code> until it completes: an interrupted rebuild is
+  resumed by the next <code>sync</code>/<code>cutover</code>;</li>
+<li><strong>new disk</strong>: a new volume and export;</li>
+<li><strong>removed disk</strong>: stop.</li>
+</ul>
+<p>The agent maps volumes to exports by virtio serial (Exoscale: the volume ID's
+first 20 characters, <code>volumes.json</code> in the payload), not by device order.</p>
+<h3 id="folded-disks">Folded disks<a class="headerlink" href="#folded-disks" title="Permanent link">&para;</a></h3>
+<p>A disk listed in <code>folds.json</code> (export, byte offset, size) is a region of the
+root disk after the system disk (1 MiB aligned, 1 MiB kept free at the end for
+a backup GPT). The agent exports it through a loop device (<code>--direct-io</code>). At
+<code>/convert</code>, before <code>virt-v2v</code>, the loop devices are released and
+<code>guestfix.fold</code> adds the region's partitions (or the whole region when it has
+no table) to the root disk's MBR or GPT, keeping the partition types and
+GPT GUIDs. <code>virt-v2v</code> then sees the guest's volume groups complete, on
+512-byte sectors.</p>
+<p>Why not the datastore HTTP file service: hostd needs an exclusive lock to
+serve <code>*-flat.vmdk</code>; a running VM's base disk is locked (<code>Failed to lock file</code>,
+HTTP 500). <code>--transport http</code> remains for powered-off VMs.</p>
+<p>Robustness: a host-wide <code>flock</code> serializes hot-add attach <strong>and detach</strong> on one
+appliance (concurrent migrations otherwise collide in vSphere with
+<code>TaskInProgress</code>, and attach retries it); a
+per-migration lock forbids two writers; at start the sweep removes <strong>this
+source VM's</strong> leftover <code>v2v-sync-*</code> snapshots and hot-added disks (never other
+VMs'); vSphere task methods wait for the VM to be idle and retry
+<code>TaskInProgress</code>. CBT is enabled VM-wide <strong>and per disk</strong> (<code>scsiX:Y.ctkEnabled</code>)
+with a snapshot stun cycle; a disk whose CBT is inactive is copied whole for
+that cycle.</p>
+<p>The changeId is stored on the receiver (RAM), not on the appliance: it is only
+valid together with the exact bytes on the receiver's disks.</p>
+<h2 id="cutover-and-conversion">Cutover and conversion<a class="headerlink" href="#cutover-and-conversion" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Final cycle after guest shutdown (Tools) / power-off.</li>
+<li><code>POST /convert</code>: <code>virt-v2v-in-place -i disk /dev/vda /dev/vdb …</code> with
+   nested KVM (<code>LIBGUESTFS_BACKEND=direct</code>); Windows gets <code>VIRTIO_WIN</code> +
+   rhsrvany (staged by <code>win-support.sh</code>, or built into the Windows receiver
+   template).</li>
+<li><code>guestfix.adapt</code> on each data volume, LVM analysis across all disks
+   (<code>lvm_report</code>), <code>guestfix.netfix</code> on the root disk.
+   On Windows, <code>netfix</code> instead queues a script in virt-v2v's firstboot
+   framework that registers a SYSTEM scheduled task: it sets the SAN policy to
+   <code>OnlineAll</code> and onlines the data disks, retries until the storage services
+   answer, and deletes itself. The script re-queues itself first, because
+   firstboot can run it while Windows is shutting down for a driver reboot.</li>
+<li><code>POST /relayout {"spares": {export: device}}</code> per <em>relayout group</em> (one
+   volume, or the volumes a volume group spans), onto spare volumes the CLI
+   creates and attaches; the CLI then detaches the originals (kept, labelled
+   <code>exo-v2v-rollback</code>). Groups run smallest first; each needs a free volume slot
+   per member.</li>
+<li><code>stop</code> → <code>scale</code> (conversion needs ≥ 8 GiB RAM: receivers run as
+   <code>standard.large</code> at least) → <code>start</code> → attach the user's security groups →
+   wait for 22/3389.</li>
+</ol>
+<h2 id="4kn-block-storage">4Kn Block Storage<a class="headerlink" href="#4kn-block-storage" title="Permanent link">&para;</a></h2>
+<p>Exoscale volumes expose 4096-byte logical sectors; the instance root disk
+exposes 512. VMware disks are 512. <code>guestfix</code>:</p>
+<ul>
+<li><strong>analyze</strong>: partition table kind and sector unit (GPT header at LBA 1 of 512
+  or 4096; for MBR the unit is inferred from where a filesystem signature
+  sits — MBR does not record it), filesystems per partition: XFS <code>sectsz</code>,
+  ext block size, NTFS bytes/sector, LVM PV, swap.</li>
+<li><strong>adapt</strong>: rewrite GPT (pMBR, header, entries, backup, CRC32s) or MBR in 4K
+  units in place; requires 4 KiB-aligned partitions and ≥ 1 MiB slack at the
+  end of the volume (the CLI provisions volumes with that slack).</li>
+<li><strong>NTFS</strong>: the boot sector's bytes-per-sector (and the derived geometry) is
+  rewritten for 4096 in place (<code>ntfs_rebps</code>); clusters must be ≥ 4 KiB. The
+  original boot sector is kept for revert.</li>
+<li><strong>relayout</strong>: copy table region + tail, <code>adapt</code> the spare, block-copy
+  compatible partitions, recreate XFS-512 / ext-1K with 4K geometry and the
+  same UUID/label, fill with <code>xfsdump | xfsrestore</code> (XFS) or <code>rsync -aAXHS</code>,
+  reading the source through a read-only <code>losetup --sector-size 512</code> view.</li>
+<li><strong>LVM</strong> (<code>lvmlayout.py</code>): the receiver never activates the guest's volume
+  groups. It reads the PV labels, PV headers and the current text metadata from
+  the disks, maps each logical volume to byte ranges, and probes the
+  filesystem at its start. A linear or striped LV with a 512-only filesystem on
+  4Kn volumes is rebuilt: the PV headers and metadata areas, and the extents of
+  the other LVs, are copied byte for byte onto the spares (same PV/VG/LV UUIDs,
+  same extents); the LV is assembled twice with <code>dmsetup</code> (old: over
+  read-only 512-sector loop views of the sources; new: over the spares) and
+  <code>rebuild_fs</code> runs between the two. A volume group with a PV on the system
+  disk is not rebuilt: its other disks must be folded.</li>
+<li><strong>Windows dynamic disks / Storage Spaces</strong> (GPT partition types for LDM
+  metadata and data, MBR type <code>0x42</code>, Storage Spaces): their own metadata
+  counts 512-byte sectors; they are left untouched and reported.</li>
+</ul>
+<h2 id="network-fix-up">Network fix-up<a class="headerlink" href="#network-fix-up" title="Permanent link">&para;</a></h2>
+<p>virt-v2v converts drivers but not interface naming. <code>v2v-netfix.service</code>
+(oneshot, <code>Before=network-pre.target</code>, every boot, idempotent) maps configured
+names that no longer exist to NICs that are not configured, in order, across
+ifupdown, netplan, NetworkManager keyfiles and ifcfg; turns <code>allow-hotplug</code>
+into <code>auto</code> (the hotplug event may have fired before the fix); removes VMware
+OUI MAC pins and persistent-net rules; runs <code>netplan generate</code>; falls back to
+DHCP on the first NIC. Log: <code>/var/log/v2v-netfix.log</code>.</p>
+<p>With a plan that maps NICs (groups), <code>POST /convert {"netmap": [...]}</code> carries
+the instance's NICs by MAC (<code>exo x get-instance</code>: the CLI's <code>instance show</code>
+has no MACs), public first. The receiver writes <code>/etc/v2v-netfix.map</code>
+(<code>MAC static ADDR/LEN nogw</code> or <code>MAC dhcp</code>) and the service applies it first:
+the configuration holding each static address is renamed to the NIC with that
+MAC (in two phases through temporary names, so <code>eth0</code> → <code>eth1</code> swaps work), its
+gateway is removed (<code>gateway</code>, <code>gateway4</code>, default routes, <code>GATEWAY=</code> with
+<code>DEFROUTE=no</code>, NetworkManager <code>never-default=true</code>), and a DHCP configuration
+is written in the guest's own stack for a mapped NIC left without one. A
+profile bound only by MAC gets an <code>interface-name</code>. Windows: a first-boot
+scheduled task (same pattern as the disk task) sets the addresses with
+<code>New-NetIPAddress</code> on the adapters with those MACs.</p>
+<h2 id="groups">Groups<a class="headerlink" href="#groups" title="Permanent link">&para;</a></h2>
+<p><code>group plan</code> builds each member's plan (<code>plan.build</code> with the NIC map from
+<code>plan.network_map</code>) and stores <code>groups/NAME/group.json</code> next to the member
+states (<code>GROUP-VM</code>, <code>state.data["group"]</code>). <code>group create</code> makes the private
+networks (managed, range = the subnet minus the top address), anti-affinity
+groups (create-time only on Exoscale, so they go into <code>instance create</code>) and
+security groups, then runs <code>create</code> per member; <code>create</code> attaches the private
+networks with <code>--ip</code> (static leases) and records the NIC MACs.</p>
+<p>Members' <code>sync</code> and <code>cutover</code> run as child processes (<code>python -m exo_v2v ...
+--in-group</code>) in their own sessions, each writing its log file: a member keeps
+going if the group process dies, and a group command run again finds it by the
+pid in the member's lock file. The per-VM cutover is split into recorded steps
+(<code>cutover_steps</code>: <code>down_at</code>, <code>source_off</code>, <code>final_cycle</code>, <code>convert_started</code>,
+<code>converted</code>, <code>flushed</code>, <code>stopped</code>, <code>scaled</code>, <code>started</code>) so that it resumes
+anywhere; <code>cutover --no-start</code> stops after the flush. The group cutover is a
+state machine in <code>group.json</code> (<code>preflight</code>, <code>warm</code>, <code>pre_hook</code>, <code>stop_started</code>,
+<code>tierN_off</code>, <code>converted</code>, <code>tierN_up</code>, <code>post_hook</code>): it starts the member
+cutovers tier by tier from the front, waits for each tier's <code>source_off</code>
+before shutting down the next, waits for every conversion, stops and scales
+all instances, then starts tier by tier from the back with health checks.
+<code>group rollback</code> stops the converted instances front first and calls the
+per-VM rollback back end first; a member whose conversion had not started
+keeps its receiver and returns to <code>syncing</code>.</p>
+<h2 id="rehearsal">Rehearsal<a class="headerlink" href="#rehearsal" title="Permanent link">&para;</a></h2>
+<p><code>rehearsal.py</code> builds, per rehearsal, a state in <code>rehearsals/NAME/rehearsal.json</code>
+and one migration state per copy (<code>&lt;migration&gt;-rh</code>, <code>data["rehearsal_of"]</code>), so
+that the per-VM functions (<code>install_agent</code>, <code>attach_networks</code>, <code>convert</code>,
+<code>stop_and_scale</code>, <code>cleanup</code>) work on copies unchanged; <code>Tunnel</code> takes a <code>jump</code>
+(the relay) and goes through it with <code>ProxyCommand ssh -W</code> (<code>-J</code> would not carry
+the options).</p>
+<ul>
+<li><strong>Networks</strong>: the front network (<code>front_cidr</code>) and a copy of each production
+  private network (same CIDR), DHCP option 6 = the relay. The relay's address
+  is the highest free address of each range; it also takes the guests'
+  on-premises DNS addresses that fall inside a rehearsal network (from the
+  VMware Tools inventory), so their lookups reach the sinkhole too.</li>
+<li><strong>Relay</strong>: stock Debian; cloud-init writes sysctl (no forwarding), nftables
+  (<code>forward</code> drop), sshd (<code>AllowTcpForwarding local</code>, <code>PermitOpen none</code> until
+  the copies' addresses are known), a minimal dnsmasq. exo-v2v then writes
+  networkd files per rehearsal NIC (matched by MAC, static addresses, no
+  routes), the final dnsmasq (<code>no-resolv</code>, <code>address=/name/ip</code>, <code>log-queries</code>)
+  and <code>PermitOpen</code> (the copies' addresses).</li>
+<li><strong>Copies' receivers</strong>: <code>instance create --public-ip none --private-network
+  &lt;front&gt;</code>; the front lease (dynamic, kept for the instance's life) is the
+  address the appliance uses; private networks attached with <code>--ip</code>. Such an
+  instance has no route to the metadata server: Exoscale attaches a NoCloud
+  drive (seen as <code>vdb</code>, 1 MiB, iso9660, not flagged read-only); <code>v2v-userdata-key</code>
+  (template) reads it, and the agent skips read-only or tiny disks
+  (<code>config_drive</code>) and finds the root disk as the first disk without a serial.</li>
+<li><strong>Seeding</strong> with the production migration's lock held: <code>block-storage
+  snapshot create</code> → <code>block-storage create --snapshot</code> → attach (the snapshot
+  is deleted right away: the volume does not depend on it); the agent installed
+  with the copy's <code>volumes.json</code>; then the production receiver runs
+  <code>rootcopy.py</code> (pushed to <code>/run</code>): 8 MiB chunks, zero chunks as WRITE_ZEROES,
+  4 NBD connections, through <code>ssh -L</code> to the copy via the relay.</li>
+<li><strong>Airgap check</strong> through the API (<code>public-ip == none</code>, rehearsal networks
+  only, no <code>routers</code> option) and on the relay (<code>ip_forward</code>, the nftables chain).</li>
+<li><strong>Conversion</strong>: <code>convert()</code> with the copy's NIC map and <code>crash_consistent</code>: the
+  agent runs <code>ntfsfix -d</code> on the system disk's NTFS partitions before
+  virt-v2v (a running Windows' replica has an unclean journal, mounted
+  read-only by libguestfs) and plain <code>ntfsfix</code> after (dirty flag: <code>chkdsk</code> at
+  first boot); journaled Linux filesystems replay on mount. Then <code>stop_and_scale</code>.
+  Start per tier; the port and the health checks are tested on the relay
+  (<code>nc</code>, <code>curl</code>).</li>
+<li><strong>Destroy</strong>: per copy <code>cleanup --delete-instance --force</code>, then a sweep by
+  name (<code>v2v-&lt;name&gt;-*-rh*</code>) of instances, volumes and snapshots, the networks
+  and the relay's security group. <code>exo-v2v gc</code> destroys the rehearsals past
+  their TTL.</li>
+</ul>
+<h2 id="vcenter">vCenter<a class="headerlink" href="#vcenter" title="Permanent link">&para;</a></h2>
+<p><code>VC.vm()</code> takes a name, an inventory path (<code>searchIndex.FindByInventoryPath</code>) or
+<code>uuid:</code> (instance UUID). Names are matched with one <code>RetrievePropertiesEx</code> over a
+container view (<code>name</code>, <code>config.template</code>), not one property read per VM; a name
+shared by several VMs is refused with their paths. The plan records the
+instance UUID and the path; <code>vm_of(plan)</code> finds the VM by UUID first. Folders
+are walked with a container view rooted at the folder. Tags come from the
+vSphere Automation API (<code>vapi.py</code>: <code>/api/session</code> or <code>/rest/com/vmware/cis/session</code>,
+<code>tag-association … list-attached-objects-on-tags</code>), returning managed object IDs
+that become <code>vim.VirtualMachine</code> references. <code>missing_privileges</code> calls
+<code>AuthorizationManager.HasPrivilegeOnEntities</code> on the VM, its datastores and the
+appliance; <code>appliance_checks</code> compares the VM's datastores with those of the
+appliance's host and reads the cluster's DRS configuration and the appliance's
+override. The simulator tests (<code>tests/test_vcsim.py</code>) load
+<code>tests/vcsim/sitecustomize.py</code>, which reads properties through the
+PropertyCollector (vcsim's reply to pyVmomi 9's <code>Fetch</code> of an unset property does
+not parse) and maps two enums vcsim leaves empty.</p>
+<h2 id="unattended-replication-and-alerts">Unattended replication and alerts<a class="headerlink" href="#unattended-replication-and-alerts" title="Permanent link">&para;</a></h2>
+<p><code>exo-v2v service install</code> writes a systemd oneshot service and a timer per
+migration (<code>sync NAME</code>), per group (<code>group sync G</code>) or for <code>watch</code>; the timer's
+<code>OnUnitInactiveSec</code> starts the next run after the previous one ended. The units
+read the credentials from a root-only environment file and run with the <code>PATH</code>
+of the installer (which <code>exo</code> they call) and <code>HOME=/root</code> (the <code>exo</code> CLI needs
+one). A cutover removes the timers once its sources are about to stop.</p>
+<p>Alerts are POSTs of <code>{"text", "event", "host", "time", ...}</code> to the webhook of
+<code>$EXO_V2V_HOME/config.yaml</code>; a failure to send is logged, never raised. <code>sync</code>
+counts failed cycles in the migration's state (<code>sync.failures</code>, <code>last_error</code>,
+<code>last_ok</code>; <code>die</code> keeps its last message) and alerts once per streak; a lock held
+by another run is not a failure. <code>watch</code> computes the lag from the state files
+and remembers what it alerted in <code>alerts.json</code>, so it never writes a migration's
+state while a sync may be saving it. <code>receiver_down</code> alerts once per outage (the
+<code>down</code> record that <code>recover</code> clears).</p>
+<h2 id="web-status-page">Web status page<a class="headerlink" href="#web-status-page" title="Permanent link">&para;</a></h2>
+<p><code>exo-v2v web</code> is a <code>ThreadingHTTPServer</code> serving <code>web.html</code> (inline CSS and
+JavaScript, no external requests) and a JSON API over the state files. It
+answers <code>GET</code>/<code>HEAD</code> only, never opens a state file for writing and never takes
+a lock: running commands are found from the pid each lock file records (checked
+against <code>/proc/PID/cmdline</code>). Member logs are served by member name only, never
+by a path from the URL. Off loopback it requires a token (bearer header or an
+HTTP-only cookie set by <code>/login</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0 and provided "as is", without warranty. VMware, vSphere, vCenter and ESXi are trademarks or registered trademarks of Broadcom Inc. and/or its subsidiaries; exo-v2v is not affiliated with or endorsed by Broadcom. <a href="https://retrack.github.io/exo-v2v/legal/">Trademarks and licences</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

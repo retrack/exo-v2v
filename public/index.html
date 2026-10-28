@@ -1,0 +1,1216 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/public/">
+      
+      
+        <link rel="prev" href="../web/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Public IPs and DNS - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#public-ips-and-dns" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Public IPs and DNS
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vcenter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    vCenter
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rehearsal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Rehearsal
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Public IPs and DNS
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Public IPs and DNS
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#elastic-ips" class="md-nav__link">
+    <span class="md-ellipsis">
+      Elastic IPs
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reverse-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reverse DNS
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      DNS records
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#renumbering-private-addresses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Renumbering private addresses
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-group-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security group rules
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Permissions
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions, API and MCP
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Project status
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../legal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Trademarks and licences
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#elastic-ips" class="md-nav__link">
+    <span class="md-ellipsis">
+      Elastic IPs
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reverse-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reverse DNS
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      DNS records
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#renumbering-private-addresses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Renumbering private addresses
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-group-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security group rules
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Permissions
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="public-ips-and-dns">Public IPs and DNS<a class="headerlink" href="#public-ips-and-dns" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<p>A migrated VM gets a new public address on Exoscale. exo-v2v handles what
+follows from that: an Elastic IP known before the window, the reverse DNS name
+(mail servers), the DNS records that point at the service, and private
+addresses that must change.</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A public address known in advance, that outlives the instance</td>
+<td>An <strong>Elastic IP</strong>, reserved at <code>create</code>, attached at cutover, configured in the guest</td>
+</tr>
+<tr>
+<td>A PTR record (mail servers, some partners)</td>
+<td><strong>Reverse DNS</strong> on the Elastic IP or the instance, set at <code>create</code></td>
+</tr>
+<tr>
+<td>Names pointed at the new address at the right time</td>
+<td><strong>DNS records</strong> on Exoscale DNS: TTL lowered at <code>create</code>, switched once the instance is healthy, put back by <code>rollback</code></td>
+</tr>
+<tr>
+<td>A private address that cannot stay (the <code>.254</code> Exoscale keeps, a subnet that overlaps)</td>
+<td><strong>Renumbering</strong>: a new address per VM, or a whole network moved to a new range</td>
+</tr>
+<tr>
+<td>Firewall rules that name other groups</td>
+<td>Security group rules with <code>sg:NAME</code> sources</td>
+</tr>
+</tbody>
+</table>
+<h2 id="elastic-ips">Elastic IPs<a class="headerlink" href="#elastic-ips" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>plan<span class="w"> </span>web01<span class="w"> </span>--vm<span class="w"> </span>web01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2<span class="w"> </span>--elastic-ip<span class="w"> </span>new<span class="w"> </span>--reverse-dns<span class="w"> </span>www.example.com
+</code></pre></div>
+<p>In a group manifest:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">vms</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lb01</span>
+<span class="w">    </span><span class="nt">public</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">elastic_ip</span><span class="p">:</span><span class="w"> </span><span class="nv">new</span><span class="p p-Indicator">,</span><span class="nt"> reverse_dns</span><span class="p">:</span><span class="w"> </span><span class="nv">shop.example.com</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mail01</span>
+<span class="w">    </span><span class="nt">public</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">elastic_ip</span><span class="p">:</span><span class="w"> </span><span class="nv">194.182.10.20</span><span class="p p-Indicator">}</span><span class="w">      </span><span class="c1"># an Elastic IP you already have, in the same zone</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create</code></td>
+<td><code>new</code> reserves an Elastic IP (description <code>v2v-&lt;migration&gt;</code>); an address you give must exist in the zone and be free. The address is printed: tell partners, update firewalls and DNS ahead</td>
+</tr>
+<tr>
+<td>cutover</td>
+<td>The Elastic IP is attached to the stopped instance before it starts. The conversion configures it in the guest (below). The cutover waits for the instance's SSH or RDP port on the Elastic IP too; in a group, a member whose Elastic IP does not answer fails its health check</td>
+</tr>
+<tr>
+<td><code>rollback</code></td>
+<td>The source VM runs again with its old address; the Elastic IP stays reserved</td>
+</tr>
+<tr>
+<td><code>cleanup</code></td>
+<td>The Elastic IP stays: it is the production address. <code>cleanup --delete-elastic-ips</code> (or <code>group cleanup --delete-elastic-ips</code>) releases the ones exo-v2v reserved; an address you brought is never released</td>
+</tr>
+</tbody>
+</table>
+<p><strong>In the guest.</strong> Exoscale delivers an Elastic IP's traffic to the instance; the
+guest must hold the address:</p>
+<ul>
+<li><strong>Linux:</strong> <code>v2v-eip.service</code> puts every address of <code>/etc/v2v-eip.list</code> on the
+  loopback interface at each boot (Exoscale's documented method). Replies leave
+  from the Elastic IP; connections the guest opens still leave from the
+  instance's own address.</li>
+<li><strong>Windows:</strong> Windows adds no address to an interface on DHCP, so a first-boot
+  task turns the public NIC static with what its DHCP lease gave (address,
+  gateway, DNS servers: an Exoscale instance keeps its public address) and adds
+  the Elastic IP as a /32 that is never used as a source. If a step fails, DHCP
+  comes back and the task tries again. Log:
+  <code>C:\ProgramData\exo-v2v\elastic-ip.log</code>.</li>
+</ul>
+<p>The instance keeps its own public address as well (health checks use it), and
+its security groups apply to the traffic of both addresses.</p>
+<h2 id="reverse-dns">Reverse DNS<a class="headerlink" href="#reverse-dns" title="Permanent link">&para;</a></h2>
+<p><code>--reverse-dns NAME</code> (or <code>public.reverse_dns</code>) sets the PTR record of the
+Elastic IP, or of the instance's address without one, at <code>create</code>. A mail
+server can then send from its final address the day it moves. The forward
+record (<code>NAME</code> → the address) is yours to create, or exo-v2v switches it (below).</p>
+<h2 id="dns-records">DNS records<a class="headerlink" href="#dns-records" title="Permanent link">&para;</a></h2>
+<p>For zones hosted on <a href="https://www.exoscale.com/dns/">Exoscale DNS</a>:</p>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>plan<span class="w"> </span>web01<span class="w"> </span>--vm<span class="w"> </span>web01<span class="w"> </span>--zone<span class="w"> </span>ch-gva-2<span class="w"> </span>--dns-record<span class="w"> </span>www.example.com<span class="w"> </span>--dns-record<span class="w"> </span>example.com
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="nt">dns</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span><span class="w">                                   </span><span class="c1"># until cleanup</span>
+<span class="w">  </span><span class="nt">records</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">www.example.com</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lb01</span><span class="w">                   </span><span class="c1"># A record -&gt; lb01's Elastic IP (or its instance IP)</span>
+<span class="w">    </span><span class="nt">example.com</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lb01</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan</code></td>
+<td>Each name must be one A record in a domain of the account (the longest matching domain holds it)</td>
+</tr>
+<tr>
+<td><code>create</code></td>
+<td>The current value and TTL of each record are saved, the TTL lowered to <code>ttl</code>. <strong>Wait at least the old TTL, plus two minutes, before the cutover</strong>: resolvers keep the old answer that long (the cutover warns otherwise)</td>
+</tr>
+<tr>
+<td>cutover</td>
+<td>Once the instance answers (a group: once the last tier is healthy, before <code>post_cutover</code>), each record points at the new address: the Elastic IP, or the instance's address. Then the zone's nameservers are asked until every one of their addresses answers the new address 10 times in a row (at most 3 minutes; the cutover never fails on it, and a group's window does not include it). A cutover whose instance did not answer leaves DNS alone: run <code>exo-v2v cutover NAME</code> again once it does</td>
+</tr>
+<tr>
+<td><code>rollback</code></td>
+<td>The old values back (the TTL stays low)</td>
+</tr>
+<tr>
+<td><code>cleanup</code></td>
+<td>The original TTL back</td>
+</tr>
+</tbody>
+</table>
+<p><code>status</code> and the web page show each record (old value, switched, how long
+until the nameservers served it, restored).</p>
+<p>Exoscale's nameservers serve a change after a few seconds to about a minute
+(1 to 62 s in our tests). During that time each nameserver address can answer
+the old and the new value in turn, so a single <code>dig</code> that shows the new address
+does not mean the change is everywhere. The check runs from the appliance over
+UDP port 53; where that is blocked it logs that it could not check, and carries on.
+Only A records of Exoscale DNS zones are handled; for another DNS provider,
+switch them in the group's <code>post_cutover</code> hook (<code>{lb01.address}</code> is the
+Elastic IP or the instance address).</p>
+<h2 id="renumbering-private-addresses">Renumbering private addresses<a class="headerlink" href="#renumbering-private-addresses" title="Permanent link">&para;</a></h2>
+<p>A group keeps its VMs' private addresses by default. To change them:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">networks</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">app</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pg-app</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">private</span>
+<span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.20.0.0/24</span>
+<span class="w">    </span><span class="nt">renumber</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.30.0.0/24</span><span class="w">          </span><span class="c1"># every member keeps its host part: 10.20.0.31 -&gt; 10.30.0.31</span>
+
+<span class="nt">vms</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">vm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">db01</span>
+<span class="w">    </span><span class="nt">ip</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="nv">10.20.0.50</span><span class="p p-Indicator">}</span><span class="w">           </span><span class="c1"># or one VM: its new address on that network</span>
+</code></pre></div>
+<p><code>plan</code> prints <code>renumbered: OLD -&gt; NEW</code>. At the conversion, the guest's network
+configuration is rewritten in place wherever it names the old address
+(ifupdown, netplan, NetworkManager, ifcfg, systemd-networkd, and the guest's own
+line in <code>/etc/hosts</code>); Windows gets the new static address. <strong>Addresses inside
+applications</strong> (a database address in a configuration file, another VM's line
+in <code>/etc/hosts</code>) are not changed: renumber what nothing else names, or update
+those with a hook. <code>renumber</code> needs the same prefix length (host parts are
+kept); the <code>.254</code> of a /24 still belongs to Exoscale's DHCP server.</p>
+<h2 id="security-group-rules">Security group rules<a class="headerlink" href="#security-group-rules" title="Permanent link">&para;</a></h2>
+<p>The rules of a manifest's <code>security_groups</code> take a CIDR or another security
+group as source:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">security_groups</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">v2v-shop-db</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"tcp/5432</span><span class="nv"> </span><span class="s">sg:v2v-shop-app"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"icmp</span><span class="nv"> </span><span class="s">10.20.0.0/24"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">v2v-shop-app</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"tcp/8080</span><span class="nv"> </span><span class="s">sg:v2v-shop-web"</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>group create</code> creates the groups that do not exist, with their rules, and
+keeps the rules of the groups it created in line with the manifest. For a
+security group that existed before, <code>group plan</code> shows the rules that differ
+and <code>group create --update-rules</code> adds the missing ones (it never removes rules
+from a group exo-v2v did not create).</p>
+<h2 id="permissions">Permissions<a class="headerlink" href="#permissions" title="Permanent link">&para;</a></h2>
+<p>The <a href="../iam/">IAM role</a> needs the Elastic IP operations (on <code>v2v-*</code> Elastic
+IPs: an existing address you bring needs a description starting with <code>v2v-</code>,
+or a rule of your own), the instance's reverse DNS, and, for DNS records, the
+<code>dns</code> service rule. These rules are in the policy file since 0.6.0.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0 and provided "as is", without warranty. VMware, vSphere, vCenter and ESXi are trademarks or registered trademarks of Broadcom Inc. and/or its subsidiaries; exo-v2v is not affiliated with or endorsed by Broadcom. <a href="https://retrack.github.io/exo-v2v/legal/">Trademarks and licences</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

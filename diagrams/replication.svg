@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 64 960 536" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="replication-title replication-desc" id="replication-root">
+        <title id="replication-title">One replication cycle</title>
+        <desc id="replication-desc">Each cycle snapshots the VM, asks vSphere which areas changed since the previous cycle, reads them from the frozen disk hot-added read-only to the appliance, writes them to the target instance over NBD, records the new change ID on the target and deletes the snapshot.</desc>
+        <defs>
+      <style>#replication-root { --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+      #replication-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #replication-root .diagram-container { width: 100%; overflow-x: auto; }
+      #replication-root .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+      @media print {
+#replication-root .diagram-container { overflow-x: visible; }
+}</style>
+          <marker id="replication-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="replication-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="replication-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="64" width="960" height="536" fill="#fafafa"/>
+<line x1="160" y1="144" x2="160" y2="520" stroke="#212121" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.20"/>
+<line x1="480" y1="144" x2="480" y2="520" stroke="#212121" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.20"/>
+<line x1="800" y1="144" x2="800" y2="520" stroke="#212121" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.20"/>
+<rect x="120" y="160" width="720" height="336" rx="4" fill="#212121" stroke="#212121" stroke-width="1" fill-opacity="0.02" stroke-opacity="0.22"/>
+<rect x="120" y="160" width="40" height="16" rx="2" fill="#fafafa" stroke="#212121" stroke-width="1" stroke-opacity="0.22"/>
+<text x="140" y="172" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.12em">LOOP</text>
+<text x="172" y="172" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.04em">[for each disk of the VM]</text>
+<rect x="156" y="196" width="8" height="284" fill="#212121" stroke="#616161" stroke-width="0.8" fill-opacity="0.06"/>
+<path d="M 164,208 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#replication-arrow-link)"/><rect x="296.0" y="188" width="48" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="197" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SNAPSHOT</text>
+<path d="M 476,240 H 168" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#replication-arrow)"/><rect x="290.0" y="220" width="64" height="12" rx="2" fill="#fafafa"/><text x="322.0" y="229" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FROZEN DISK</text>
+<path d="M 164,272 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#replication-arrow-link)"/><rect x="292.0" y="252" width="56" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="261" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">QUERY CBT</text>
+<path d="M 476,304 H 168" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#replication-arrow)"/><rect x="284.0" y="284" width="76" height="12" rx="2" fill="#fafafa"/><text x="322.0" y="293" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CHANGED AREAS</text>
+<path d="M 164,336 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#replication-arrow-link)"/><rect x="282.0" y="316" width="76" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="325" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">HOT-ADD (R/O)</text>
+<path d="M 164,352 H 188 Q 196,352 196,360 Q 196,368 188,368 H 166" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#replication-arrow)"/><rect x="204" y="354" width="68" height="12" rx="2" fill="#fafafa"/><text x="238.0" y="363" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">READ CHANGES</text>
+<path d="M 164,416 H 796" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#replication-arrow-accent)"/><rect x="292.0" y="396" width="56" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="405" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">NBD WRITE</text>
+<path d="M 164,448 H 796" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#replication-arrow)"/><rect x="282.0" y="428" width="76" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="437" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SAVE CHANGEID</text>
+<path d="M 164,472 H 476" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#replication-arrow-link)"/><rect x="282.0" y="452" width="76" height="12" rx="2" fill="#fafafa"/><text x="320.0" y="461" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">DROP SNAPSHOT</text>
+<rect x="72.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="72.0" y="88" width="176" height="56" rx="6" fill="#da291c" stroke="#da291c" stroke-width="1" fill-opacity="0.08"/>
+<rect x="80.0" y="94" width="28" height="12" rx="2" fill="none" stroke="#da291c" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="94.0" y="103" fill="#da291c" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="160.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Replication appliance</text>
+<text x="160.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">exo-v2v sync</text>
+<rect x="392.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="392.0" y="88" width="176" height="56" rx="6" fill="#212121" stroke="#212121" stroke-width="1" fill-opacity="0.03" stroke-opacity="0.30"/>
+<rect x="400.0" y="94" width="28" height="12" rx="2" fill="none" stroke="#212121" stroke-width="0.8" stroke-opacity="0.22"/>
+<text x="414.0" y="103" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+<text x="480.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">vCenter / ESXi</text>
+<text x="480.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">vSphere API</text>
+<rect x="712.0" y="88" width="176" height="56" rx="6" fill="#fafafa"/>
+<rect x="712.0" y="88" width="176" height="56" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="720.0" y="94" width="28" height="12" rx="2" fill="none" stroke="#212121" stroke-width="0.8" stroke-opacity="0.40"/>
+<text x="734.0" y="103" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VM</text>
+<text x="800.0" y="120.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Target instance</text>
+<text x="800.0" y="136.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">agent in RAM</text>
+<line x1="40" y1="544" x2="920" y2="544" stroke="#212121" stroke-width="0.8" stroke-opacity="0.10"/>
+<text x="40" y="560" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<path d="M 40,577 H 68" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#replication-arrow-link)"/>
+<text x="76" y="580" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">vSphere call</text>
+<path d="M 165.2,577 H 193.2" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#replication-arrow)"/>
+<text x="201.2" y="580" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Return</text>
+<path d="M 259.79999999999995,577 H 287.79999999999995" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#replication-arrow-accent)"/>
+<text x="295.79999999999995" y="580" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Data to Exoscale</text>
+<path d="M 405.4,577 H 433.4" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#replication-arrow)"/>
+<text x="441.4" y="580" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Agent call</text>
+      </svg>

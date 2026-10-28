@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 56 960 472" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc" id="architecture-root">
+        <title id="architecture-title">How exo-v2v moves a running VM</title>
+        <desc id="architecture-desc">The replication appliance reads frozen snapshots of the source VM's disks inside vSphere and writes them through an SSH tunnel onto the disks of the target Exoscale instance, whose agent runs from RAM, booted from a receiver template or rebuilt from a stock template.</desc>
+        <defs>
+      <style>#architecture-root { --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+      #architecture-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #architecture-root .diagram-container { width: 100%; overflow-x: auto; }
+      #architecture-root .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+      @media print {
+#architecture-root .diagram-container { overflow-x: visible; }
+}</style>
+          <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="architecture-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="architecture-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="56" width="960" height="472" fill="#fafafa"/>
+<rect x="48" y="80" width="384" height="360" rx="8" fill="#212121" stroke="#212121" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.10"/><rect x="60" y="84" width="104" height="12" rx="2" fill="#fafafa"/><text x="112.0" y="93" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.14em">VSPHERE · ON-PREMISES</text>
+<rect x="552" y="80" width="368" height="360" rx="8" fill="#212121" stroke="#212121" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.10"/><rect x="564" y="84" width="72" height="12" rx="2" fill="#fafafa"/><text x="600.0" y="93" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.14em">EXOSCALE ZONE</text>
+<path d="M 144,192 V 284" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="152" y="232" width="28" height="12" rx="2" fill="#fafafa"/><text x="166.0" y="241" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">VMDK</text>
+<path d="M 256,160 H 220" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+<rect x="224.0" y="140" width="28" height="12" rx="2" fill="#fafafa"/><text x="238.0" y="149" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SNAP</text>
+<path d="M 336,288 V 196" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+<rect x="344" y="234" width="64" height="12" rx="2" fill="#fafafa"/><text x="376.0" y="243" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">VSPHERE API</text>
+<path d="M 216,320 H 252" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="222.0" y="328" width="28" height="12" rx="2" fill="#fafafa"/><text x="236.0" y="337" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">READ</text>
+<path d="M 416,304 H 472 Q 480,304 480,296 V 168 Q 480,160 488,160 H 580" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+<rect x="488" y="226" width="48" height="12" rx="2" fill="#fafafa"/><text x="512.0" y="235" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">API :443</text>
+<path d="M 416,336 H 580" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#architecture-arrow-accent)"/>
+<rect x="458.0" y="344" width="80" height="12" rx="2" fill="#fafafa"/><text x="498.0" y="353" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SSH TUNNEL :22</text>
+<path d="M 656,192 V 252" fill="none" stroke="#2f5d8c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#architecture-arrow-link)"/>
+<rect x="664" y="216" width="80" height="12" rx="2" fill="#fafafa"/><text x="704.0" y="225" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CREATE · SCALE</text>
+<path d="M 792,176 H 760 Q 752,176 752,184 V 260 Q 752,268 744,268 H 732" fill="none" stroke="#616161" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#architecture-arrow)"/>
+<rect x="760" y="216" width="60" height="12" rx="2" fill="#fafafa"/><text x="790.0" y="225" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">BOOT IMAGE</text>
+<path d="M 728,296 H 788" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="748.0" y="276" width="24" height="12" rx="2" fill="#fafafa"/><text x="760.0" y="285" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">VDA</text>
+<path d="M 728,392 H 788" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="746.0" y="372" width="28" height="12" rx="2" fill="#fafafa"/><text x="760.0" y="381" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">VDB…</text>
+<rect x="72" y="128" width="144" height="64" rx="6" fill="#fafafa"/>
+<rect x="72" y="128" width="144" height="64" rx="6" fill="#616161" stroke="#5f6368" stroke-width="1" fill-opacity="0.10"/>
+<rect x="80" y="134" width="28" height="12" rx="2" fill="none" stroke="#5f6368" stroke-width="0.8" stroke-opacity="0.40"/>
+<text x="94.0" y="143" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VM</text>
+<text x="144.0" y="164.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Source VM</text>
+<text x="144.0" y="180.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">running workload</text>
+<rect x="256" y="128" width="160" height="64" rx="6" fill="#fafafa"/>
+<rect x="256" y="128" width="160" height="64" rx="6" fill="#212121" stroke="#212121" stroke-width="1" fill-opacity="0.03" stroke-opacity="0.30"/>
+<rect x="264" y="134" width="28" height="12" rx="2" fill="none" stroke="#212121" stroke-width="0.8" stroke-opacity="0.22"/>
+<text x="278.0" y="143" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+<text x="336.0" y="164.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">vCenter / ESXi</text>
+<text x="336.0" y="180.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">snapshots · CBT</text>
+<rect x="72" y="288" width="144" height="64" rx="6" fill="#fafafa"/>
+<rect x="72" y="288" width="144" height="64" rx="6" fill="#212121" stroke="#616161" stroke-width="1" fill-opacity="0.05"/>
+<rect x="80" y="294" width="28" height="12" rx="2" fill="none" stroke="#616161" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="94.0" y="303" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DS</text>
+<text x="144.0" y="324.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Datastore</text>
+<text x="144.0" y="340.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">VMDK files</text>
+<rect x="256" y="288" width="160" height="64" rx="6" fill="#fafafa"/>
+<rect x="256" y="288" width="160" height="64" rx="6" fill="#da291c" stroke="#da291c" stroke-width="1" fill-opacity="0.08"/>
+<rect x="264" y="294" width="28" height="12" rx="2" fill="none" stroke="#da291c" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="278.0" y="303" fill="#da291c" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="336.0" y="324.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Replication appliance</text>
+<text x="336.0" y="340.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">exo-v2v · Linux VM</text>
+<rect x="584" y="128" width="144" height="64" rx="6" fill="#fafafa"/>
+<rect x="584" y="128" width="144" height="64" rx="6" fill="#212121" stroke="#212121" stroke-width="1" fill-opacity="0.03" stroke-opacity="0.30"/>
+<rect x="592" y="134" width="28" height="12" rx="2" fill="none" stroke="#212121" stroke-width="0.8" stroke-opacity="0.22"/>
+<text x="606.0" y="143" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+<text x="656.0" y="164.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Exoscale API</text>
+<text x="656.0" y="180.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">compute</text>
+<rect x="584" y="256" width="144" height="168" rx="6" fill="#fafafa"/>
+<rect x="584" y="256" width="144" height="168" rx="6" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<rect x="592" y="262" width="28" height="12" rx="2" fill="none" stroke="#212121" stroke-width="0.8" stroke-opacity="0.40"/>
+<text x="606.0" y="271" fill="#212121" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VM</text>
+<text x="656.0" y="338.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Target instance</text>
+<text x="656.0" y="354.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">agent in RAM</text>
+<text x="656.0" y="367.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">NBD · convert</text>
+<rect x="792" y="128" width="112" height="64" rx="6" fill="#fafafa"/>
+<rect x="792" y="128" width="112" height="64" rx="6" fill="#212121" stroke="#616161" stroke-width="1" fill-opacity="0.05"/>
+<rect x="800" y="134" width="28" height="12" rx="2" fill="none" stroke="#616161" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="814.0" y="143" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">TPL</text>
+<text x="848.0" y="164.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Template</text>
+<text x="848.0" y="180.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">exo-v2v receiver</text>
+<rect x="792" y="264" width="112" height="64" rx="6" fill="#fafafa"/>
+<rect x="792" y="264" width="112" height="64" rx="6" fill="#212121" stroke="#616161" stroke-width="1" fill-opacity="0.05"/>
+<rect x="800" y="270" width="28" height="12" rx="2" fill="none" stroke="#616161" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="814.0" y="279" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+<text x="848.0" y="300.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Root disk</text>
+<text x="848.0" y="316.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">512 B sectors</text>
+<rect x="792" y="360" width="112" height="64" rx="6" fill="#fafafa"/>
+<rect x="792" y="360" width="112" height="64" rx="6" fill="#212121" stroke="#616161" stroke-width="1" fill-opacity="0.05"/>
+<rect x="800" y="366" width="28" height="12" rx="2" fill="none" stroke="#616161" stroke-width="0.8" stroke-opacity="0.50"/>
+<text x="814.0" y="375" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VOL</text>
+<text x="848.0" y="396.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Volumes</text>
+<text x="848.0" y="412.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">4 KiB sectors</text>
+<line x1="48" y1="464" x2="920" y2="464" stroke="#212121" stroke-width="0.8" stroke-opacity="0.10"/>
+<text x="48" y="480" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="48" y="492" width="14" height="10" rx="2" fill="#da291c" stroke="#da291c" stroke-width="1" fill-opacity="0.08"/>
+<text x="68" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">exo-v2v</text>
+<rect x="131.7" y="492" width="14" height="10" rx="2" fill="#616161" stroke="#5f6368" stroke-width="1" fill-opacity="0.10"/>
+<text x="151.7" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Source</text>
+<rect x="210.29999999999998" y="492" width="14" height="10" rx="2" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="230.29999999999998" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Target</text>
+<rect x="288.9" y="492" width="14" height="10" rx="2" fill="#212121" stroke="#616161" stroke-width="1" fill-opacity="0.05"/>
+<text x="308.9" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Disk · image</text>
+<rect x="398.09999999999997" y="492" width="14" height="10" rx="2" fill="#212121" stroke="#212121" stroke-width="1" fill-opacity="0.03" stroke-opacity="0.30"/>
+<text x="418.09999999999997" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Control API</text>
+<path d="M 502.2,497 H 530.2" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#architecture-arrow-accent)"/>
+<text x="538.2" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Replicated data</text>
+<path d="M 642.7,497 H 670.7" fill="none" stroke="#2f5d8c" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+<text x="678.7" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">API call</text>
+<path d="M 747.5,497 H 775.5" fill="none" stroke="#616161" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<text x="783.5" y="500" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Disk access</text>
+      </svg>

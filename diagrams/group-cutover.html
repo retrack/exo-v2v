@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A group cutover</title>
+  <!-- diagram-design skill, Exoscale skin, font source: system (no network requests) -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Timeline · exo-v2v group</p>
+    <h1>A group cutover</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 60 960 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="group-cutover-title group-cutover-desc">
+        <title id="group-cutover-title">A group cutover</title>
+        <desc id="group-cutover-desc">The tiers of an application stop front to back: the load balancer, then the application servers, then the database. Each VM's final copy and conversion start as soon as it is off, and the conversions overlap. The tiers then start back to front, each one only after the health checks of the previous one pass.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="60" width="960" height="480" fill="#fafafa"/>
+<line x1="284.0" y1="384" x2="884.0" y2="384" stroke="#da291c" stroke-width="1.2"/>
+<line x1="284.0" y1="378" x2="284.0" y2="390" stroke="#da291c" stroke-width="1.2"/>
+<line x1="884.0" y1="378" x2="884.0" y2="390" stroke="#da291c" stroke-width="1.2"/>
+<rect x="482.0" y="392" width="204" height="12" rx="2" fill="#fafafa"/><text x="584.0" y="401" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">MAINTENANCE WINDOW ≈ THE SLOWEST MEMBER</text>
+<path d="M 296.0,176 V 222" fill="none" stroke="#da291c" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#arrow-accent)"/>
+<path d="M 356.0,264 V 310" fill="none" stroke="#da291c" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#arrow-accent)"/>
+<path d="M 744.0,312 V 266" fill="none" stroke="#2f5d8c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-link)"/>
+<path d="M 814.0,224 V 178" fill="none" stroke="#2f5d8c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-link)"/>
+<rect x="260.0" y="194" width="28" height="12" rx="2" fill="#fafafa"/><text x="274.0" y="203" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">STOP</text>
+<rect x="320.0" y="282" width="28" height="12" rx="2" fill="#fafafa"/><text x="334.0" y="291" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">STOP</text>
+<rect x="752.0" y="282" width="44" height="12" rx="2" fill="#fafafa"/><text x="774.0" y="291" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">HEALTHY</text>
+<rect x="822.0" y="194" width="44" height="12" rx="2" fill="#fafafa"/><text x="844.0" y="203" fill="#2f5d8c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">HEALTHY</text>
+<text x="72" y="152" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.14em">TIER 3</text>
+<text x="72" y="167" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">lb01</text>
+<text x="72" y="240" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.14em">TIER 2</text>
+<text x="72" y="255" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">app01 · app02</text>
+<text x="72" y="328" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.14em">TIER 1</text>
+<text x="72" y="343" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">db01</text>
+<rect x="204.0" y="136" width="80.0" height="40" rx="4" fill="#fafafa"/>
+<rect x="204.0" y="136" width="80.0" height="40" rx="4" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="244.0" y="159" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON VMWARE</text>
+<rect x="284.0" y="136" width="60.00000000000001" height="40" rx="4" fill="#fafafa"/>
+<rect x="284.0" y="136" width="60.00000000000001" height="40" rx="4" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<text x="314.0" y="159" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FINAL COPY</text>
+<rect x="344.0" y="136" width="240.0" height="40" rx="4" fill="#fafafa"/>
+<rect x="344.0" y="136" width="240.0" height="40" rx="4" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="464.0" y="159" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CONVERT</text>
+<rect x="824.0" y="136" width="79.99999999999999" height="40" rx="4" fill="#fafafa"/>
+<rect x="824.0" y="136" width="79.99999999999999" height="40" rx="4" fill="rgba(47,93,140,0.18)" stroke="#2f5d8c" stroke-width="1"/>
+<text x="864.0000000000001" y="159" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON EXOSCALE</text>
+<rect x="204.0" y="224" width="140.0" height="40" rx="4" fill="#fafafa"/>
+<rect x="204.0" y="224" width="140.0" height="40" rx="4" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="274.0" y="247" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON VMWARE</text>
+<rect x="344.0" y="224" width="60.00000000000001" height="40" rx="4" fill="#fafafa"/>
+<rect x="344.0" y="224" width="60.00000000000001" height="40" rx="4" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<text x="374.0" y="247" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FINAL</text>
+<rect x="404.0" y="224" width="239.99999999999994" height="40" rx="4" fill="#fafafa"/>
+<rect x="404.0" y="224" width="239.99999999999994" height="40" rx="4" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="524.0" y="247" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CONVERT</text>
+<rect x="754.0" y="224" width="150.0" height="40" rx="4" fill="#fafafa"/>
+<rect x="754.0" y="224" width="150.0" height="40" rx="4" fill="rgba(47,93,140,0.18)" stroke="#2f5d8c" stroke-width="1"/>
+<text x="829.0" y="247" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON EXOSCALE</text>
+<rect x="204.0" y="312" width="200.0" height="40" rx="4" fill="#fafafa"/>
+<rect x="204.0" y="312" width="200.0" height="40" rx="4" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="304.0" y="335" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON VMWARE</text>
+<rect x="404.0" y="312" width="59.999999999999964" height="40" rx="4" fill="#fafafa"/>
+<rect x="404.0" y="312" width="59.999999999999964" height="40" rx="4" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<text x="434.0" y="335" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FINAL</text>
+<rect x="464.0" y="312" width="210.00000000000006" height="40" rx="4" fill="#fafafa"/>
+<rect x="464.0" y="312" width="210.00000000000006" height="40" rx="4" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="569.0" y="335" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">CONVERT</text>
+<rect x="684.0" y="312" width="220.00000000000003" height="40" rx="4" fill="#fafafa"/>
+<rect x="684.0" y="312" width="220.00000000000003" height="40" rx="4" fill="rgba(47,93,140,0.18)" stroke="#2f5d8c" stroke-width="1"/>
+<text x="794.0" y="335" fill="#212121" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">ON EXOSCALE</text>
+<line x1="244.0" y1="96" x2="244.0" y2="124" stroke="#5f6368" stroke-width="1" stroke-dasharray="2,2"/>
+<rect x="200.0" y="84" width="88" height="12" rx="2" fill="#fafafa"/><text x="244.0" y="93" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">PRE_CUTOVER HOOK</text>
+<line x1="884.0" y1="96" x2="884.0" y2="124" stroke="#5f6368" stroke-width="1" stroke-dasharray="2,2"/>
+<rect x="836.0" y="84" width="96" height="12" rx="2" fill="#fafafa"/><text x="884.0" y="93" fill="#5f6368" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">POST_CUTOVER HOOK</text>
+<line x1="72" y1="440" x2="912" y2="440" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/>
+<text x="72" y="456" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="72" y="468" width="14" height="10" rx="2" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="92" y="476" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Source VM running</text>
+<rect x="206.7" y="468" width="14" height="10" rx="2" fill="rgba(218,41,28,0.08)" stroke="#da291c" stroke-width="1"/>
+<text x="226.7" y="476" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Final copy (VM off)</text>
+<rect x="351.59999999999997" y="468" width="14" height="10" rx="2" fill="#ffffff" stroke="#212121" stroke-width="1"/>
+<text x="371.59999999999997" y="476" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Conversion</text>
+<rect x="450.59999999999997" y="468" width="14" height="10" rx="2" fill="rgba(47,93,140,0.18)" stroke="#2f5d8c" stroke-width="1"/>
+<text x="470.59999999999997" y="476" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Running on Exoscale</text>
+      </svg>
+    </div>
+    <p class="caption">Tier 1 is the back end: stopped last, started first. The window lasts about as long as the slowest member's own cutover, not the sum of them.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Where each VM disk goes</title>
+  <!-- diagram-design skill, Exoscale skin, font source: system (no network requests) -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #fafafa;
+      --color-ink:    #212121;
+      --color-muted:  #616161;
+      --color-accent: #da291c;
+      --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-mono:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    .caption { font-family: var(--font-serif); font-style: italic; font-size: 1rem; color: var(--color-muted);
+               margin-top: 1rem; max-width: 60ch; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Disk mapping · exo-v2v</p>
+    <h1>Where each VM disk goes</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 56 960 544" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="disks-title disks-desc">
+        <title id="disks-title">Where each VM disk goes</title>
+        <desc id="disks-desc">A VM's system disk, read through its snapshot chain, becomes the root disk of the target instance. A disk that extends the root volume group is carried inside the root disk as an extra partition. The other disks become Block Storage volumes with 4 KiB sectors, their partition tables rescaled and 512-byte-sector filesystems or logical volumes rebuilt.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#616161"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#da291c"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2f5d8c"/></marker>
+        </defs>
+        <rect x="0" y="56" width="960" height="544" fill="#fafafa"/>
+<rect x="48" y="80" width="256" height="416" rx="8" fill="rgba(33,33,33,0.02)" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/><rect x="60" y="84" width="96" height="12" rx="2" fill="#fafafa"/><text x="108.0" y="93" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.14em">VSPHERE · SOURCE VM</text>
+<rect x="656" y="80" width="256" height="416" rx="8" fill="rgba(33,33,33,0.02)" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/><rect x="668" y="84" width="128" height="12" rx="2" fill="#fafafa"/><text x="732.0" y="93" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.14em">EXOSCALE · TARGET INSTANCE</text>
+<path d="M 280,160 H 676" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="418.0" y="140" width="120" height="12" rx="2" fill="#fafafa"/><text x="478.0" y="149" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">READ THROUGH THE CHAIN</text>
+<path d="M 280,292 H 560 Q 568,292 568,284 V 232 Q 568,224 576,224 H 676" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="354.0" y="272" width="132" height="12" rx="2" fill="#fafafa"/><text x="420.0" y="281" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FOLDED: SAME VOLUME GROUP</text>
+<path d="M 280,372 H 676" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="394.0" y="352" width="168" height="12" rx="2" fill="#fafafa"/><text x="478.0" y="361" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">TABLE RESCALED · XFS-512 REBUILT</text>
+<path d="M 280,452 H 676" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="416.0" y="432" width="124" height="12" rx="2" fill="#fafafa"/><text x="478.0" y="441" fill="#da291c" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">LV REBUILT · SAME UUIDS</text>
+<rect x="72" y="112" width="208" height="128" rx="6" fill="#fafafa"/>
+<rect x="72" y="112" width="208" height="128" rx="6" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<rect x="80" y="118" width="32" height="12" rx="2" fill="none" stroke="rgba(95,99,104,0.40)" stroke-width="0.8"/>
+<text x="96.0" y="127" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CHAIN</text>
+<text x="176.0" y="148" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">System disk · scsi0:0</text>
+<rect x="84" y="158" width="184" height="20" rx="3" fill="#ffffff" stroke="#616161" stroke-width="0.8"/>
+<text x="176.0" y="171" fill="#616161" font-size="8.5" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">app01.vmdk · base</text>
+<rect x="84" y="184" width="184" height="20" rx="3" fill="#ffffff" stroke="#616161" stroke-width="0.8"/>
+<text x="176.0" y="197" fill="#616161" font-size="8.5" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">app01-000001 · snapshot</text>
+<rect x="84" y="210" width="184" height="20" rx="3" fill="#ffffff" stroke="#da291c" stroke-width="0.8"/>
+<text x="176.0" y="223" fill="#212121" font-size="8.5" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">app01-000002 · running</text>
+<rect x="72" y="264" width="208" height="56" rx="6" fill="#fafafa"/>
+<rect x="72" y="264" width="208" height="56" rx="6" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<rect x="80" y="270" width="28" height="12" rx="2" fill="none" stroke="rgba(95,99,104,0.40)" stroke-width="0.8"/>
+<text x="94.0" y="279" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+<text x="176.0" y="296.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">scsi1:0</text>
+<text x="176.0" y="312.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">root volume group extension</text>
+<rect x="72" y="344" width="208" height="56" rx="6" fill="#fafafa"/>
+<rect x="72" y="344" width="208" height="56" rx="6" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<rect x="80" y="350" width="28" height="12" rx="2" fill="none" stroke="rgba(95,99,104,0.40)" stroke-width="0.8"/>
+<text x="94.0" y="359" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+<text x="176.0" y="376.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">scsi0:1</text>
+<text x="176.0" y="392.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">data disk, XFS</text>
+<rect x="72" y="424" width="208" height="56" rx="6" fill="#fafafa"/>
+<rect x="72" y="424" width="208" height="56" rx="6" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<rect x="80" y="430" width="28" height="12" rx="2" fill="none" stroke="rgba(95,99,104,0.40)" stroke-width="0.8"/>
+<text x="94.0" y="439" fill="#5f6368" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+<text x="176.0" y="456.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">nvme0:0</text>
+<text x="176.0" y="472.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">data disk, LVM</text>
+<rect x="680" y="112" width="208" height="128" rx="6" fill="#fafafa"/>
+<rect x="680" y="112" width="208" height="128" rx="6" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<rect x="688" y="118" width="28" height="12" rx="2" fill="none" stroke="rgba(97,97,97,0.50)" stroke-width="0.8"/>
+<text x="702.0" y="127" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+<text x="784.0" y="174.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Root disk</text>
+<text x="784.0" y="190.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">512 B sectors</text>
+<text x="784.0" y="203.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">system disk + folded disk</text>
+<rect x="680" y="344" width="208" height="56" rx="6" fill="#fafafa"/>
+<rect x="680" y="344" width="208" height="56" rx="6" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<rect x="688" y="350" width="28" height="12" rx="2" fill="none" stroke="rgba(97,97,97,0.50)" stroke-width="0.8"/>
+<text x="702.0" y="359" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VOL</text>
+<text x="784.0" y="376.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Block Storage volume</text>
+<text x="784.0" y="392.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">4 KiB sectors</text>
+<rect x="680" y="424" width="208" height="56" rx="6" fill="#fafafa"/>
+<rect x="680" y="424" width="208" height="56" rx="6" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<rect x="688" y="430" width="28" height="12" rx="2" fill="none" stroke="rgba(97,97,97,0.50)" stroke-width="0.8"/>
+<text x="702.0" y="439" fill="#616161" font-size="7" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">VOL</text>
+<text x="784.0" y="456.0" fill="#212121" font-size="12" font-weight="600" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">Block Storage volume</text>
+<text x="784.0" y="472.0" fill="#616161" font-size="9" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">4 KiB sectors</text>
+<line x1="48" y1="520" x2="912" y2="520" stroke="rgba(33,33,33,0.10)" stroke-width="0.8"/>
+<text x="48" y="536" fill="#616161" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="48" y="548" width="14" height="10" rx="2" fill="rgba(97,97,97,0.10)" stroke="#5f6368" stroke-width="1"/>
+<text x="68" y="556" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Source disk</text>
+<rect x="152.1" y="548" width="14" height="10" rx="2" fill="rgba(33,33,33,0.05)" stroke="#616161" stroke-width="1"/>
+<text x="172.1" y="556" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Exoscale disk</text>
+<path d="M 266.4,553 H 294.4" fill="none" stroke="#da291c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<text x="302.4" y="556" fill="#616161" font-size="8.5" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">Replicated</text>
+      </svg>
+    </div>
+    <p class="caption">Each cycle reads a disk as the VM sees it, through the whole snapshot chain. The root disk keeps 512-byte sectors, Block Storage volumes have 4 KiB sectors.</p>
+  </div>
+</body>
+</html>

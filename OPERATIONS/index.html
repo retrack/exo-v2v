@@ -1,0 +1,1515 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/OPERATIONS/">
+      
+      
+        <link rel="prev" href="../iam/">
+      
+      
+        <link rel="next" href="../groups/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Operations runbook - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#exo-v2v-operations-runbook" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Operations runbook
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vcenter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    vCenter
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-replication-appliance-once-per-vsphere-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Replication appliance (once per vSphere environment)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-a-migration-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. A migration, end to end
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. A migration, end to end">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#an-application-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      An application (group)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-rehearsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      A rehearsal
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unattended-timers-and-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Unattended: timers and alerts
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bandwidth-limit-schedule-compression" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bandwidth: limit, schedule, compression
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Rollback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Troubleshooting
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-clean-up-of-exoscale-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Clean-up of Exoscale resources
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rehearsal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Rehearsal
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../public/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Public IPs and DNS
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions, API and MCP
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Project status
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../legal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Trademarks and licences
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-replication-appliance-once-per-vsphere-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Replication appliance (once per vSphere environment)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-a-migration-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. A migration, end to end
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. A migration, end to end">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#an-application-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      An application (group)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-rehearsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      A rehearsal
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unattended-timers-and-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Unattended: timers and alerts
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bandwidth-limit-schedule-compression" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bandwidth: limit, schedule, compression
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Rollback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Troubleshooting
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-clean-up-of-exoscale-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Clean-up of Exoscale resources
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="exo-v2v-operations-runbook">exo-v2v operations runbook<a class="headerlink" href="#exo-v2v-operations-runbook" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<h2 id="1-replication-appliance-once-per-vsphere-environment">1. Replication appliance (once per vSphere environment)<a class="headerlink" href="#1-replication-appliance-once-per-vsphere-environment" title="Permanent link">&para;</a></h2>
+<p>A small Linux VM on a host that sees the source datastores (one appliance can
+serve several migrations; hot-adds are serialized on it):</p>
+<ul>
+<li>Ubuntu 24.04 / Debian 12+, 2 vCPU, 4 GiB RAM, 20 GB disk, <strong>paravirtual SCSI</strong>
+  controller (free units are used for hot-added disks; add a second pvscsi
+  controller if you run many migrations in parallel).</li>
+<li>Network: TCP 443 to vCenter/ESXi, TCP 22 to the Exoscale zone(s).</li>
+<li>Software: <code>python3 -m pip install exo_v2v-*.whl</code> (or pipx), the <code>exo</code> CLI
+  configured with an API key limited to the <strong>compute</strong> service.</li>
+<li>Run <code>sync</code>/<code>cutover</code> as root (<code>sudo -E</code>, so <code>VSPHERE_*</code> / <code>EXOSCALE_*</code> pass).</li>
+</ul>
+<p>Sizing, measured in our lab (VMFS on hard disks, the appliance with 4 vCPU and
+8 GiB RAM, a group of 10 VMs with 55 GB of data on 18 disks, 5 in parallel):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Measured</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>group create</code> (10 targets from receiver templates)</td>
+<td>3 min 26 s</td>
+</tr>
+<tr>
+<td>First full copy, 5 VMs at a time</td>
+<td>15 min 6 s: 62 MiB/s for the appliance, 7–38 MiB/s per VM (more for large contiguous data)</td>
+</tr>
+<tr>
+<td>Appliance CPU during the full copy</td>
+<td>40 % on average (plus 14 % I/O wait), peaks at 100 %</td>
+</tr>
+<tr>
+<td>A delta round of the 10 VMs with no changes</td>
+<td>116 s (snapshot, change query and removal: 10–77 s per VM, longer with more disks)</td>
+</tr>
+<tr>
+<td><code>group cutover</code> of the 10 VMs (3 tiers)</td>
+<td>window 803 s: the sources off in 3 min, 8 VMs converted 5 min later; one VM's three XFS-512 volume rebuilds set the end</td>
+</tr>
+</tbody>
+</table>
+<p>The datastore set the pace here; on faster storage the appliance's CPU does
+(the copy reads, compares zeros and encrypts). Plan 2 vCPU for one or two
+concurrent copies, 4 vCPU for about five; <code>group sync</code> runs <code>sync.parallel</code> at
+a time (default 4).</p>
+<p>vSphere permissions for the migration account: on the source VMs
+<code>VirtualMachine.State.CreateSnapshot/RemoveSnapshot</code>, <code>VirtualMachine.Config.ChangeTracking</code>,
+<code>VirtualMachine.Interact.PowerOff/PowerOn</code> (cutover/rollback), <code>VirtualMachine.Provisioning.DiskRandomRead</code>;
+on the appliance VM <code>VirtualMachine.Config.AddExistingDisk/RemoveDisk</code>; <code>Datastore.FileManagement</code> (read).
+On a vCenter, see <a href="../vcenter/">vCenter</a> for the role, where the appliance runs, and DRS.</p>
+<h2 id="2-a-migration-end-to-end">2. A migration, end to end<a class="headerlink" href="#2-a-migration-end-to-end" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Command</th>
+<th>Duration</th>
+<th>Source VM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plan</td>
+<td><code>exo-v2v plan NAME --vm VM --zone Z [--instance-type T] [--security-group SG] [--receiver-template TPL]</code></td>
+<td>seconds</td>
+<td>untouched</td>
+</tr>
+<tr>
+<td>Receiver</td>
+<td><code>exo-v2v create NAME</code></td>
+<td>~1 min with a <a href="../receiver-templates/">receiver template</a>, 5–15 min without</td>
+<td>untouched</td>
+</tr>
+<tr>
+<td>Initial copy</td>
+<td><code>sudo -E exo-v2v sync NAME</code></td>
+<td>allocated data / throughput</td>
+<td>running (snapshot during the cycle)</td>
+</tr>
+<tr>
+<td>Keep fresh</td>
+<td><code>sudo -E exo-v2v service install NAME --every 1h</code> (a timer, below), or <code>sudo -E exo-v2v sync NAME --every 900</code> in a terminal</td>
+<td>per cycle: changes since last cycle</td>
+<td>running</td>
+</tr>
+<tr>
+<td>Cutover</td>
+<td><code>sudo -E exo-v2v cutover NAME</code></td>
+<td>final delta + convert (2–5 min) + relayout (if any) + boot</td>
+<td><strong>shut down</strong></td>
+</tr>
+<tr>
+<td>Validate</td>
+<td>test the application on the instance</td>
+<td></td>
+<td>off</td>
+</tr>
+<tr>
+<td>Finish</td>
+<td><code>exo-v2v cleanup NAME [--delete-rollback-volumes]</code></td>
+<td></td>
+<td>off (keep it until you are sure)</td>
+</tr>
+</tbody>
+</table>
+<p>Downtime ≈ shutdown + last delta + conversion + boot. Run a sync cycle shortly
+before the cutover so that the final delta is small.</p>
+<p><code>exo-v2v status [-v] [NAME]</code> shows the phase, the last cycle and its age.</p>
+<h3 id="an-application-group">An application (group)<a class="headerlink" href="#an-application-group" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Command</th>
+<th>Source VMs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Draft</td>
+<td><code>exo-v2v group discover NAME --vm A --vm B ... --zone Z</code> (or <code>--folder DC/vm/FOLDER</code>, <code>--tag CATEGORY:TAG</code> on a <a href="../vcenter/">vCenter</a>) then edit <code>NAME.yaml</code></td>
+<td>untouched</td>
+</tr>
+<tr>
+<td>Plan</td>
+<td><code>exo-v2v group plan NAME -f NAME.yaml</code></td>
+<td>untouched</td>
+</tr>
+<tr>
+<td>Networks + receivers</td>
+<td><code>exo-v2v group create NAME</code></td>
+<td>untouched</td>
+</tr>
+<tr>
+<td>Copy and keep fresh</td>
+<td><code>sudo -E exo-v2v group sync NAME [--every 900]</code></td>
+<td>running</td>
+</tr>
+<tr>
+<td>Window</td>
+<td><code>sudo -E exo-v2v group cutover NAME</code></td>
+<td><strong>shut down</strong>, front to back</td>
+</tr>
+<tr>
+<td>Follow</td>
+<td><code>exo-v2v group status NAME</code>, the <a href="../web/">web page</a>, <code>~/.exo-v2v/groups/NAME/logs/VM.log</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Finish</td>
+<td><code>exo-v2v group cleanup NAME</code></td>
+<td>off</td>
+</tr>
+</tbody>
+</table>
+<p>Before the window: lower the TTL of the DNS names that will move (the load
+balancer's new address is its receiver's IP, shown by <code>group status</code>), and
+check that <code>group sync</code> ran recently (<code>cutover.max_sync_age</code>).</p>
+<h3 id="a-rehearsal">A rehearsal<a class="headerlink" href="#a-rehearsal" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Start</td>
+<td><code>sudo -E exo-v2v group rehearse NAME</code> (or <code>exo-v2v rehearse MIGRATION --tcp 22</code>)</td>
+</tr>
+<tr>
+<td>Look</td>
+<td><code>exo-v2v rehearsal connect NAME</code> (SSH config through the relay), <code>--forward VM:PORT</code></td>
+</tr>
+<tr>
+<td>Report</td>
+<td><code>exo-v2v rehearsal report NAME</code>: times, predicted window, names the copies tried to resolve</td>
+</tr>
+<tr>
+<td>Throw away</td>
+<td><code>exo-v2v rehearsal destroy NAME</code> (or <code>exo-v2v watch</code>, below, after the TTL)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="unattended-timers-and-alerts">Unattended: timers and alerts<a class="headerlink" href="#unattended-timers-and-alerts" title="Permanent link">&para;</a></h3>
+<p>Replication runs for days; the appliance can run it without a terminal and
+call for a person when something needs one.</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>service<span class="w"> </span>install<span class="w"> </span>web01<span class="w"> </span>--every<span class="w"> </span>1h<span class="w"> </span>--write-env<span class="w">   </span><span class="c1"># a cycle every hour (systemd timer)</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>service<span class="w"> </span>install<span class="w"> </span>--group<span class="w"> </span>shop<span class="w"> </span>--every<span class="w"> </span>1h
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>service<span class="w"> </span>install<span class="w"> </span>--watch<span class="w">                          </span><span class="c1"># every 15 min: lag alerts, expired rehearsals</span>
+exo-v2v<span class="w"> </span>service<span class="w"> </span>list
+sudo<span class="w"> </span>exo-v2v<span class="w"> </span>service<span class="w"> </span>remove<span class="w"> </span>web01
+</code></pre></div>
+<p>A timer starts the next cycle <code>--every</code> after the previous one ended, so cycles
+never overlap. The units run as root with the variables of
+<code>/etc/exo-v2v/exo-v2v.env</code> (<code>--write-env</code> writes it, mode 600, from the current
+<code>VSPHERE_*</code> and <code>EXOSCALE_*</code>); the <code>exo</code> CLI found in your <code>PATH</code> at install time
+is the one they use. A cutover removes the timers of what it moves once the
+sources stop; <code>cleanup</code> too.</p>
+<p>Alerts go to a webhook, set in <code>$EXO_V2V_HOME/config.yaml</code> (<code>/var/lib/exo-v2v</code>
+or <code>~/.exo-v2v</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">alerts</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">webhook</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://hooks.slack.com/services/T000/B000/XXXX</span><span class="w">   </span><span class="c1"># Slack, Mattermost, Teams: JSON with "text"</span>
+<span class="w">  </span><span class="nt">lag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4h</span><span class="w">          </span><span class="c1"># a syncing migration whose last good cycle is older</span>
+<span class="w">  </span><span class="nt">failures</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w">      </span><span class="c1"># failed cycles in a row</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sync-failing</code> / <code>sync-recovered</code></td>
+<td><code>failures</code> cycles failed in a row (with the last error) / the next good cycle</td>
+</tr>
+<tr>
+<td><code>lag</code> / <code>lag-recovered</code></td>
+<td><code>exo-v2v watch</code> finds a migration whose last good cycle is older than <code>lag</code> / it caught up</td>
+</tr>
+<tr>
+<td><code>receiver-down</code></td>
+<td><code>sync</code> finds the receiver stopped, restarted or booted from its disk (once per outage)</td>
+</tr>
+<tr>
+<td><code>cutover-done</code> / <code>cutover-failed</code></td>
+<td>a cutover or group cutover finished / stopped</td>
+</tr>
+<tr>
+<td><code>rehearsal-expired</code></td>
+<td><code>watch</code> destroyed a rehearsal at the end of its TTL</td>
+</tr>
+<tr>
+<td><code>job-started</code> / <code>job-finished</code> / <code>job-failed</code></td>
+<td>an action started from the web page (<a href="../api/#actions-jobs">jobs</a>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>exo-v2v alert test</code> sends a test message. Without a webhook, alerts are only
+logged. <code>status</code> and the <a href="../web/">web page</a> show failed cycles, the last error
+and a lag over the threshold.</p>
+<h3 id="bandwidth-limit-schedule-compression">Bandwidth: limit, schedule, compression<a class="headerlink" href="#bandwidth-limit-schedule-compression" title="Permanent link">&para;</a></h3>
+<p>The copies share your uplink with everything else. One limit applies to the
+whole appliance, whatever runs: single syncs, group members, timers.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># $EXO_V2V_HOME/config.yaml</span>
+<span class="nt">wan</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">400Mbit</span><span class="w">                  </span><span class="c1"># default rate (Mbit, Mbps, MiB/s, ...; off = none)</span>
+<span class="w">  </span><span class="nt">schedule</span><span class="p">:</span><span class="w">                       </span><span class="c1"># the first rule that matches wins (the appliance's local time)</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">days</span><span class="p">:</span><span class="w"> </span><span class="nv">mon-fri</span><span class="p p-Indicator">,</span><span class="nt"> hours</span><span class="p">:</span><span class="w"> </span><span class="s">"07:00-19:00"</span><span class="p p-Indicator">,</span><span class="nt"> limit</span><span class="p">:</span><span class="w"> </span><span class="nv">100Mbit</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">days</span><span class="p">:</span><span class="w"> </span><span class="nv">fri</span><span class="p p-Indicator">,</span><span class="nt"> hours</span><span class="p">:</span><span class="w"> </span><span class="s">"22:00-06:00"</span><span class="p p-Indicator">,</span><span class="nt"> limit</span><span class="p">:</span><span class="w"> </span><span class="nv">off</span><span class="p p-Indicator">}</span><span class="w">     </span><span class="c1"># a window across midnight belongs to its first day</span>
+<span class="w">  </span><span class="nt">compress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">                  </span><span class="c1"># auto: zlib while a limit of 50 MiB/s or less applies; on; off</span>
+<span class="w">  </span><span class="nt">final</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">off</span><span class="w">                      </span><span class="c1"># the final (cutover) cycle never waits: "limit" makes it wait too</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>exo-v2v<span class="w"> </span>wan<span class="w"> </span>status<span class="w">                      </span><span class="c1"># now: 100 Mbit/s (schedule mon-fri 07:00-19:00), next change ...</span>
+sudo<span class="w"> </span>-E<span class="w"> </span>exo-v2v<span class="w"> </span>group<span class="w"> </span>sync<span class="w"> </span>shop<span class="w"> </span>--bwlimit<span class="w"> </span>1Gbit<span class="w">   </span><span class="c1"># this run: the whole appliance at 1 Gbit/s (off = none)</span>
+</code></pre></div>
+<ul>
+<li>Every sender takes its bytes from one token bucket (a small file under
+  <code>/run/lock</code>), so the limit holds for the sum, and an idle sender leaves its
+  share to the others. The configuration is read again every 15 seconds: a
+  schedule change applies in the middle of a long copy. <code>--bwlimit</code> applies to
+  the whole appliance while that run lives.</li>
+<li>A limit of 0 is refused: a copy paused in the middle keeps its snapshot open.
+  To keep business hours free, run the timers outside them instead.</li>
+<li>The final cycle of a cutover never waits (its bytes still count, so the other
+  copies slow down); <code>final: limit</code> makes it wait too.</li>
+<li><strong>Compression</strong> uses zlib in the copy threads. In our lab the appliance
+  compressed 74 MiB/s per vCPU (33 MiB/s for data that does not compress), and
+  an Ubuntu system disk shrank to 31 %: worth it on a link of a few hundred
+  Mbit/s, not on a fast one, hence <code>auto</code>. Data that does not compress is sent
+  as is (one chunk in 8 is tried). The receiver must run 0.6 or later (a sync
+  upgrades it; the final cycle of an older receiver is sent uncompressed).</li>
+<li><code>status</code>, <code>group status</code> and the web page show, per cycle, the bytes sent
+  after compression and the time spent waiting for the limit.</li>
+</ul>
+<h2 id="3-rollback">3. Rollback<a class="headerlink" href="#3-rollback" title="Permanent link">&para;</a></h2>
+<p>Before cleanup the source VM is intact (only its CBT setting was enabled):
+<code>exo-v2v rollback NAME</code> powers it back on and stops the Exoscale instance.
+After a cutover, data written on Exoscale is <strong>not</strong> copied back.</p>
+<p>For a group, <code>exo-v2v group rollback NAME</code> stops the Exoscale instances (front first) and powers
+the sources on, back end first. Members that were not converted yet keep syncing.</p>
+<h2 id="4-troubleshooting">4. Troubleshooting<a class="headerlink" href="#4-troubleshooting" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause / action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create</code> times out</td>
+<td>Console of the instance in the portal; <code>/var/log/v2v-bootstrap.log</code> on it (apt mirror reachable? 2+ disks attached?). <code>cleanup --delete-instance</code> and <code>create</code> again.</td>
+</tr>
+<tr>
+<td><code>receiver … is running but does not answer on SSH</code></td>
+<td>The receiver restarted; with the boot mask (0.4.1 and later) nothing boots. <code>exo-v2v recover NAME</code>, then <code>sync</code>: the system disk is copied again, the volumes only for their changes.</td>
+</tr>
+<tr>
+<td><code>receiver … restarted and booted the copy of the source VM on its disk</code></td>
+<td>A receiver created before 0.4.1 (no boot mask) restarted and booted its replica; <code>sync</code> stopped it. <code>exo-v2v recover NAME</code>, then <code>sync</code> (the volumes are copied in full: the copy may have written to them).</td>
+</tr>
+<tr>
+<td><code>receiver … is stopped</code></td>
+<td>Someone stopped it. <code>exo-v2v recover NAME</code> (do not just start it: an instance created before 0.4.1 would boot its replica).</td>
+</tr>
+<tr>
+<td><code>receiver is not in its RAM root any more</code></td>
+<td>The receiver booted a disk instead of its RAM root. <code>exo-v2v recover NAME</code>.</td>
+</tr>
+<tr>
+<td><code>cannot reopen the egress of …</code> at cutover</td>
+<td>The appliance's IAM role lacks <code>delete-rule-from-security-group</code> (added in 0.4.1): update it (<code>exo iam role update exo-v2v-appliance --policy - &lt; docs/iam/exo-v2v-appliance-policy.json</code>) and run <code>cutover</code> again. Nothing was stopped.</td>
+</tr>
+<tr>
+<td><code>Change tracking is not active on disk …</code> in logs</td>
+<td>Per-disk CBT was off; that disk is copied whole once, CBT is enabled automatically for the next cycle.</td>
+</tr>
+<tr>
+<td><code>hot-added … never appeared as a block device</code></td>
+<td>The appliance has no free SCSI unit or a non-paravirtual controller only; add a pvscsi controller to the appliance.</td>
+</tr>
+<tr>
+<td><code>Another task is already in progress</code></td>
+<td>Handled (waits/retries). If persistent: a snapshot consolidation is running on the source; wait.</td>
+</tr>
+<tr>
+<td>Cutover: <code>conversion failed</code></td>
+<td><code>exo-v2v status -v NAME</code>; the receiver's <code>/var/log/v2v-convert.log</code> (via <code>ssh -i ~/.exo-v2v/NAME/id_ed25519 USER@IP</code>: <code>v2v</code> on a receiver template, <code>debian</code> or <code>ubuntu</code> (UEFI) on a stock one). The source stays off: fix and re-run <code>cutover</code>, or <code>rollback</code>.</td>
+</tr>
+<tr>
+<td>Guest has no network after cutover</td>
+<td><code>/var/log/v2v-netfix.log</code> on the guest (portal console). Static IP configs need the new Exoscale address.</td>
+</tr>
+<tr>
+<td>Data volume not mounted after cutover</td>
+<td><code>journalctl -b -u &lt;mount&gt;</code>; <code>exo-v2v status -v NAME</code> and the cutover log list what was rebuilt and what was left as is (e.g. an LV type other than linear/striped). See <a href="../limitations/">Limitations</a>.</td>
+</tr>
+<tr>
+<td><code>plan</code> warns that the system disk is a guess</td>
+<td>No boot order and no VMware Tools disk mapping. Start the VM with Tools running and plan again, or pass <code>--system-disk scsiX:Y</code>.</td>
+</tr>
+<tr>
+<td>Preflight: <code>spans the 512-sector system disk and 4Kn volumes … fold</code></td>
+<td>A volume group spans the system disk and another disk, and <code>plan</code> could not see it (no VMware Tools mapping). <code>cleanup --delete-instance</code>, then <code>plan --fold DISK</code>, <code>create</code>, <code>sync</code>.</td>
+</tr>
+<tr>
+<td><code>sync</code>: <code>the root disk must grow … resetting</code></td>
+<td>The system disk (or a folded disk) grew: the receiver is re-imaged with a bigger root disk; its volumes keep their copy. If interrupted, the next <code>sync</code> resumes it.</td>
+</tr>
+<tr>
+<td><code>sync</code>: <code>disk(s) … removed from VM</code></td>
+<td>The copy no longer matches the VM. <code>cleanup --delete-instance</code>, then plan and create again.</td>
+</tr>
+<tr>
+<td>Windows: a dynamic or Storage Spaces volume is missing after cutover</td>
+<td>Not supported on data disks (preflight reports it). Roll back, convert the disks to basic (copy spanned/striped volumes to basic ones), migrate again.</td>
+</tr>
+<tr>
+<td>Windows: D: (data) missing after cutover</td>
+<td>First boot runs several driver-install reboots (5–10 min) before the <code>exo-v2v-online-disks</code> scheduled task onlines the disks; check <code>C:\ProgramData\exo-v2v\online-disks.log</code> and <code>C:\Program Files\Guestfs\Firstboot\log.txt</code>. Manually: <code>Set-Disk -Number 1 -IsOffline $false</code>.</td>
+</tr>
+<tr>
+<td>Rehearsal: <code>receiver template ... not found: rehearsal copies need one</code></td>
+<td>Build and register <a href="../receiver-templates/">receiver templates</a> (0.4 or later)</td>
+</tr>
+<tr>
+<td>Rehearsal: a copy's receiver never answers through the relay</td>
+<td>A template older than 0.4 (it waits for the metadata server and never gets its key): rebuild the templates</td>
+</tr>
+<tr>
+<td><code>rehearsal ... is up</code> when cutting over</td>
+<td>Destroy the rehearsal first (<code>exo-v2v rehearsal destroy NAME</code>) or pass <code>--allow-rehearsal</code></td>
+</tr>
+<tr>
+<td><code>cutover</code> interrupted (appliance reboot, lost session)</td>
+<td>Run <code>cutover NAME</code> again: it records its steps and resumes (it does not convert twice). A group: <code>group cutover NAME</code> again; member cutovers still running are waited for</td>
+</tr>
+<tr>
+<td><code>group cutover</code>: <code>preflight: ... last cycle ... ago</code></td>
+<td>Run <code>group sync</code> first, or raise <code>cutover.max_sync_age</code></td>
+</tr>
+<tr>
+<td><code>group cutover</code> stopped on a member</td>
+<td><code>group status NAME</code> and the member's log in <code>~/.exo-v2v/groups/NAME/logs/</code>. Fix, then <code>group cutover NAME</code> again (it resumes), or <code>group rollback NAME</code></td>
+</tr>
+<tr>
+<td><code>group cutover</code>: health check failed</td>
+<td>The member runs on Exoscale but its check did not pass within <code>health_timeout</code>: check the service and its security groups (the check reaches the public IP from the appliance). Run <code>group cutover</code> again once fixed, or roll back</td>
+</tr>
+<tr>
+<td>A member has no private address after cutover</td>
+<td><code>/var/log/v2v-netfix.log</code> in the guest; <code>exo compute private-network show v2v-GROUP-NET</code> lists the leases. The NIC map is in <code>/etc/v2v-netfix.map</code></td>
+</tr>
+<tr>
+<td>Windows volume shows RAW</td>
+<td>It was formatted with &lt; 4 KiB clusters (cannot be expressed in 4 KiB sectors); move the data or reformat with 4 KiB clusters before migrating.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-clean-up-of-exoscale-resources">5. Clean-up of Exoscale resources<a class="headerlink" href="#5-clean-up-of-exoscale-resources" title="Permanent link">&para;</a></h2>
+<p>Everything exo-v2v creates carries the label <code>exo-v2v=&lt;NAME&gt;</code>: the instance,
+its volumes, <code>&lt;volume&gt;-4k</code> relayout volumes and the security group
+<code>exo-v2v-&lt;NAME&gt;</code>. A group also creates <code>v2v-GROUP-*</code> private networks, anti-affinity groups
+and the security groups its manifest defines; <code>group cleanup --delete-instances</code> removes them. Rollback copies of relaid volumes additionally carry
+<code>exo-v2v-rollback=&lt;export&gt;</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0 and provided "as is", without warranty. VMware, vSphere, vCenter and ESXi are trademarks or registered trademarks of Broadcom Inc. and/or its subsidiaries; exo-v2v is not affiliated with or endorsed by Broadcom. <a href="https://retrack.github.io/exo-v2v/legal/">Trademarks and licences</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

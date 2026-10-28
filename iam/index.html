@@ -1,0 +1,1212 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Warm migration of VMware vSphere VMs to Exoscale">
+      
+      
+      
+        <link rel="canonical" href="https://retrack.github.io/exo-v2v/iam/">
+      
+      
+        <link rel="prev" href="../vcenter/">
+      
+      
+        <link rel="next" href="../OPERATIONS/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>IAM role - exo-v2v</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/exoscale.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#iam-role-for-the-replication-appliance" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            
+  <strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab
+  (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and
+  behaviour may change.
+
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="exo-v2v" class="md-header__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            exo-v2v
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              IAM role
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="exo-v2v" class="md-nav__button md-logo" aria-label="exo-v2v" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    exo-v2v
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/retrack/exo-v2v" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    retrack/exo-v2v
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Concepts
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How it works
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../receiver-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Receiver templates
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Set up and run
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Set up and run
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Prerequisites
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vcenter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    vCenter
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    IAM role
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      The role
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-the-role-before-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      Check the role before production
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-role-does-not-restrict" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the role does not restrict
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-simpler-alternative" class="md-nav__link">
+    <span class="md-ellipsis">
+      A simpler alternative
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Operations runbook
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Moving an application
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rehearsal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Rehearsal
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Web status page
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../public/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Public IPs and DNS
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions, API and MCP
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-os/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Supported operating systems
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Limitations
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Project status
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../legal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Trademarks and licences
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      The role
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-the-role-before-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      Check the role before production
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-role-does-not-restrict" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the role does not restrict
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-simpler-alternative" class="md-nav__link">
+    <span class="md-ellipsis">
+      A simpler alternative
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="iam-role-for-the-replication-appliance">IAM role for the replication appliance<a class="headerlink" href="#iam-role-for-the-replication-appliance" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Experimental.</strong> exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.</p>
+</blockquote>
+<p>The replication appliance calls the Exoscale API through the <code>exo</code> CLI. Give it
+an API key bound to a dedicated role, not your account's own key.</p>
+<p>exo-v2v only uses the Compute service: instances, Block Storage volumes,
+security groups and, for groups, private networks and anti-affinity groups.
+Everything it creates follows fixed naming rules, which the role below uses to
+limit what the key can touch.</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Target instance</td>
+<td><code>v2v-&lt;migration&gt;</code> (group members: <code>v2v-&lt;group&gt;-&lt;vm&gt;</code>)</td>
+</tr>
+<tr>
+<td>Block Storage volumes</td>
+<td><code>v2v-&lt;migration&gt;-d&lt;N&gt;</code>, <code>v2v-&lt;migration&gt;-d&lt;N&gt;-4k</code></td>
+</tr>
+<tr>
+<td>Security group of a migration</td>
+<td><code>exo-v2v-&lt;migration&gt;</code></td>
+</tr>
+<tr>
+<td>Temporary SSH key (registered by <code>exo</code> while it creates the instance, then deleted)</td>
+<td><code>v2v-&lt;migration&gt;-&lt;timestamp&gt;</code></td>
+</tr>
+<tr>
+<td>Group private network</td>
+<td><code>v2v-&lt;group&gt;-&lt;network&gt;</code> (or a <code>v2v-*</code> network you name with <code>exoscale_name</code>)</td>
+</tr>
+<tr>
+<td>Group anti-affinity group</td>
+<td><code>v2v-&lt;group&gt;-&lt;name&gt;</code></td>
+</tr>
+<tr>
+<td>Security groups a group manifest defines</td>
+<td><code>v2v-*</code> (or <code>exo-v2v-*</code>)</td>
+</tr>
+<tr>
+<td>Rehearsal: copies, relay, networks, its security group</td>
+<td><code>v2v-&lt;migration&gt;-rh</code>, <code>v2v-&lt;name&gt;-rh-relay</code>, <code>v2v-&lt;name&gt;-rh-&lt;network&gt;</code></td>
+</tr>
+<tr>
+<td>Rehearsal: snapshots and volumes</td>
+<td><code>v2v-&lt;volume&gt;-rh-&lt;time&gt;</code>, <code>v2v-&lt;migration&gt;-rh-d&lt;N&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>If you name the instance yourself with <code>create --instance-name</code>, start the name
+with <code>v2v-</code>, or the role below refuses it.</p>
+<p>exo-v2v also labels its instances and volumes <code>exo-v2v=&lt;migration&gt;</code>, but the
+role does not rely on labels: in our tests, Exoscale IAM refused
+<code>create-instance</code> and <code>create-block-storage-volume</code> calls under a rule that
+checked <code>parameters.labels</code>, while rules on names worked.</p>
+<h2 id="the-role">The role<a class="headerlink" href="#the-role" title="Permanent link">&para;</a></h2>
+<p><a href="exo-v2v-appliance-policy.json"><code>iam/exo-v2v-appliance-policy.json</code></a>:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Allows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Every read operation (<code>get-*</code>, <code>list-*</code>) in Compute: zones, templates, instance types, and the state of the resources above</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Creating <code>v2v-*</code> instances (with or without a public IP), volumes (also from a snapshot), SSH keys, private networks and anti-affinity groups</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Deleting <code>v2v-*</code> SSH keys</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Starting, stopping, scaling, resetting, renaming (<code>update-instance</code>, used by <code>cleanup</code> for a group member's final name) and deleting <code>v2v-*</code> instances. Reset: when the source system disk grows during replication, the target is re-imaged with a bigger root disk</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Attaching a <code>v2v-*</code> volume to a <code>v2v-*</code> instance</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Detaching, relabelling, resizing and deleting <code>v2v-*</code> volumes</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Snapshotting volumes into <code>v2v-*</code> snapshots (rehearsal seeding)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Deleting and relabelling <code>v2v-*</code> snapshots</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Attaching instances to <code>v2v-*</code> private networks (with a static lease)</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Deleting <code>v2v-*</code> private networks</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Deleting <code>v2v-*</code> anti-affinity groups</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Creating <code>exo-v2v-*</code> and <code>v2v-*</code> security groups</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Adding and deleting rules, deleting, and detaching instances from <code>exo-v2v-*</code> and <code>v2v-*</code> security groups</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Attaching an instance to a security group (cutover attaches the groups you name in <code>plan --security-group</code> or in a group manifest)</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Creating Elastic IPs whose description starts with <code>v2v-</code> (<code>--elastic-ip new</code>)</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Attaching, detaching, setting the reverse DNS of, and deleting <code>v2v-*</code> Elastic IPs (by description: an Elastic IP you bring needs a description starting with <code>v2v-</code>, or a rule of your own)</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Setting the reverse DNS of a <code>v2v-*</code> instance</td>
+</tr>
+<tr>
+<td>18</td>
+<td>DNS: reading domains and records, updating records (the <a href="../public/#dns-records">DNS switch</a>); no domain or record is created or deleted. Narrow it to your domains, or drop it if you do not switch DNS with exo-v2v</td>
+</tr>
+</tbody>
+</table>
+<p>Everything else is denied, including every other Exoscale service. The
+operations in the rules are the ones exo-v2v calls through <code>exo</code> 1.103:
+recorded during a full migration with 0.1.0 (create, sync, cutover with a
+volume rebuild, cleanup), plus the security-group attach and detach used by
+<code>plan --security-group</code> and by <code>cleanup</code> without <code>--delete-instance</code>. 0.2.0
+adds <code>resize-block-storage-volume</code> (a data disk that grows during replication)
+and <code>reset-instance</code> (a system disk that grows). 0.3.0 adds what groups need:
+<code>create-private-network</code>, <code>attach-instance-to-private-network</code>,
+<code>delete-private-network</code>, <code>create-anti-affinity-group</code>,
+<code>delete-anti-affinity-group</code>, <code>update-instance</code> (rename), and <code>v2v-*</code> security
+groups. Exoscale evaluates <code>attach-instance-to-private-network</code> against the
+private network, not the instance: a rule on the instance name never matches it. 0.4.0 adds
+<code>create-block-storage-snapshot</code> (matched on the snapshot's name: the volume is not loaded for
+that operation) and <code>delete-block-storage-snapshot</code> for rehearsals. 0.4.1 adds
+<code>delete-rule-from-security-group</code>: a receiver's security group allows no egress until the
+cutover, which removes that rule before it stops the source (without the permission the cutover
+stops there, with nothing stopped).</p>
+<p>0.6.0 adds rules 15 to 18 (Elastic IPs, reverse DNS, DNS records). They follow
+the operation names of the Exoscale API but were not yet exercised under a
+restricted key in our lab (the lab ran them with an unrestricted one): if a
+call is refused, the command stops with <code>Forbidden</code> before anything else
+changes, and the rule to widen is the one above.</p>
+<p>To update an existing role: <code>exo iam role update exo-v2v-appliance --policy - &lt; docs/iam/exo-v2v-appliance-policy.json</code>.</p>
+<p>Create the role and a key bound to it with the <code>exo</code> CLI, from an account that
+can manage IAM:</p>
+<div class="highlight"><pre><span></span><code>exo<span class="w"> </span>iam<span class="w"> </span>role<span class="w"> </span>create<span class="w"> </span>exo-v2v-appliance<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--description<span class="w"> </span><span class="s2">"exo-v2v replication appliance"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--policy<span class="w"> </span>-<span class="w"> </span>&lt;<span class="w"> </span>docs/iam/exo-v2v-appliance-policy.json
+exo<span class="w"> </span>iam<span class="w"> </span>api-key<span class="w"> </span>create<span class="w"> </span>exo-v2v-appliance<span class="w"> </span>exo-v2v-appliance
+</code></pre></div>
+<p>The second command prints the key and its secret once. On the appliance, store
+them with <code>exo config</code> or export them as <code>EXOSCALE_API_KEY</code> and
+<code>EXOSCALE_API_SECRET</code> for the user that runs exo-v2v.</p>
+<h2 id="check-the-role-before-production">Check the role before production<a class="headerlink" href="#check-the-role-before-production" title="Permanent link">&para;</a></h2>
+<p>We validated this role on 2026-10-19 with two complete migrations (Ubuntu 24.04,
+and AlmaLinux 9 with a volume rebuild) through <code>cleanup --delete-instance</code>, on
+2026-10-21 with a data disk and a system disk that grew during replication,
+and on 2026-10-23 with three group runs (5 VMs): <code>group create</code> (private
+network, anti-affinity group, security groups, receivers attached to the
+private network with static leases), the cutovers, <code>group rollback</code>,
+<code>group cleanup --delete-instances</code>, and a hand-over <code>group cleanup</code> with a
+rename. On 2026-10-23 also with rehearsals (snapshots, volumes from snapshots, instances without a
+public IP, the relay and its networks, destroy). Every <code>exo</code> call was made with the role's key.</p>
+<p>Run one migration of a small test VM with your new key too, through <code>cleanup
+--delete-instance</code>. A refused call stops exo-v2v with an error that names the
+<code>exo</code> command; check the Exoscale console for leftovers after a failed test.</p>
+<h2 id="what-the-role-does-not-restrict">What the role does not restrict<a class="headerlink" href="#what-the-role-does-not-restrict" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Read operations cover every Compute resource of the organization, not only
+  exo-v2v's: the <code>exo</code> CLI looks resources up by name.</li>
+<li>Rule 9 lets the key attach any security group to any instance. Exoscale
+  evaluates that operation against the security group, not the instance.</li>
+<li>Every rule matches names (<code>v2v-</code>, <code>exo-v2v-</code>), not labels. Do not give
+  other instances, volumes, SSH keys, private networks, anti-affinity groups or
+  security groups names with those prefixes, or the key can manage them too.</li>
+<li>Rule 7 lets the key attach any <code>v2v-*</code> instance to a <code>v2v-*</code> private network.</li>
+<li>A group member renamed at <code>cleanup</code> leaves the role's scope: that is the
+  hand-over (the key can no longer stop or delete it).</li>
+</ul>
+<h2 id="a-simpler-alternative">A simpler alternative<a class="headerlink" href="#a-simpler-alternative" title="Permanent link">&para;</a></h2>
+<p>If you prefer a role that is easier to read, allow the whole Compute service
+and nothing else:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"default-service-strategy"</span><span class="p">:</span><span class="w"> </span><span class="s2">"deny"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"services"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"compute"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"allow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"rules"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>It can manage every Compute resource of the organization, so use it only in
+an organization dedicated to the migration.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      exo-v2v is licensed under the Apache License 2.0 and provided "as is", without warranty. VMware, vSphere, vCenter and ESXi are trademarks or registered trademarks of Broadcom Inc. and/or its subsidiaries; exo-v2v is not affiliated with or endorsed by Broadcom. <a href="https://retrack.github.io/exo-v2v/legal/">Trademarks and licences</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>
