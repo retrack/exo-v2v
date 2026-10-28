@@ -1,6 +1,6 @@
 # exo-v2v operations runbook
 
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 ## 1. Replication appliance (once per vSphere environment)
 
@@ -116,10 +116,50 @@ alerts:
 | `receiver-down` | `sync` finds the receiver stopped, restarted or booted from its disk (once per outage) |
 | `cutover-done` / `cutover-failed` | a cutover or group cutover finished / stopped |
 | `rehearsal-expired` | `watch` destroyed a rehearsal at the end of its TTL |
+| `job-started` / `job-finished` / `job-failed` | an action started from the web page ([jobs](api.md#actions-jobs)) |
 
 `exo-v2v alert test` sends a test message. Without a webhook, alerts are only
 logged. `status` and the [web page](web.md) show failed cycles, the last error
 and a lag over the threshold.
+
+### Bandwidth: limit, schedule, compression
+
+The copies share your uplink with everything else. One limit applies to the
+whole appliance, whatever runs: single syncs, group members, timers.
+
+```yaml
+# $EXO_V2V_HOME/config.yaml
+wan:
+  limit: 400Mbit                  # default rate (Mbit, Mbps, MiB/s, ...; off = none)
+  schedule:                       # the first rule that matches wins (the appliance's local time)
+    - {days: mon-fri, hours: "07:00-19:00", limit: 100Mbit}
+    - {days: fri, hours: "22:00-06:00", limit: off}     # a window across midnight belongs to its first day
+  compress: auto                  # auto: zlib while a limit of 50 MiB/s or less applies; on; off
+  final: off                      # the final (cutover) cycle never waits: "limit" makes it wait too
+```
+
+```bash
+exo-v2v wan status                      # now: 100 Mbit/s (schedule mon-fri 07:00-19:00), next change ...
+sudo -E exo-v2v group sync shop --bwlimit 1Gbit   # this run: the whole appliance at 1 Gbit/s (off = none)
+```
+
+- Every sender takes its bytes from one token bucket (a small file under
+  `/run/lock`), so the limit holds for the sum, and an idle sender leaves its
+  share to the others. The configuration is read again every 15 seconds: a
+  schedule change applies in the middle of a long copy. `--bwlimit` applies to
+  the whole appliance while that run lives.
+- A limit of 0 is refused: a copy paused in the middle keeps its snapshot open.
+  To keep business hours free, run the timers outside them instead.
+- The final cycle of a cutover never waits (its bytes still count, so the other
+  copies slow down); `final: limit` makes it wait too.
+- **Compression** uses zlib in the copy threads. In our lab the appliance
+  compressed 74 MiB/s per vCPU (33 MiB/s for data that does not compress), and
+  an Ubuntu system disk shrank to 31 %: worth it on a link of a few hundred
+  Mbit/s, not on a fast one, hence `auto`. Data that does not compress is sent
+  as is (one chunk in 8 is tried). The receiver must run 0.6 or later (a sync
+  upgrades it; the final cycle of an older receiver is sent uncompressed).
+- `status`, `group status` and the web page show, per cycle, the bytes sent
+  after compression and the time spent waiting for the limit.
 
 ## 3. Rollback
 

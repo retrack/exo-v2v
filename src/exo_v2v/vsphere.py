@@ -37,7 +37,6 @@ device reads), a paravirtual/LSI SCSI controller with free units on the proxy.
 Crash safety: leftover v2v-sync-* snapshots on the source and hot-added
 nonpersistent disks on the proxy are cleaned up at the start of every run.
 """
-import argparse
 import concurrent.futures as cf
 import contextlib
 import fcntl
@@ -49,9 +48,11 @@ import os
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
+import zlib
 
 from .receiver import nbdproto as P
 
@@ -65,6 +66,7 @@ except ImportError:  # pragma: no cover
 CHUNK = 8 << 20          # NBD write unit
 MAX_RANGE = 64 << 20     # largest single HTTP Range request
 SNAP_PREFIX = "v2v-sync"
+KEEPALIVE_S = 600         # vSphere sessions expire after 30 min idle
 
 
 from .util import log
@@ -83,8 +85,20 @@ class VC:
         self.content = self.si.RetrieveContent()
         self.ssl = ctx or ssl.create_default_context()
         self.user, self.password, self.insecure = user, password, insecure
+        # vCenter and ESXi drop a session idle for 30 minutes; a hot-add copy of a large disk
+        # makes no API call for hours, and the detach after it would fail.
+        self._stop = threading.Event()
+        threading.Thread(target=self._keepalive, daemon=True).start()
+
+    def _keepalive(self, every=KEEPALIVE_S):
+        while not self._stop.wait(every):
+            try:
+                self.si.CurrentTime()
+            except Exception as e:                # the next real call reports it
+                log(f"vSphere keepalive: {e}")
 
     def close(self):
+        self._stop.set()
         Disconnect(self.si)
 
     def about(self):
@@ -637,10 +651,11 @@ def vm_disk_files(vm):
     return {f for f in files if f.endswith(".vmdk")}
 
 
-def sweep(vc, vm, proxy):
-    """Crash recovery for THIS source VM only: our leftover snapshots on it and
-    its disks still hot-added to the proxy. Disks of other source VMs on the
-    same appliance belong to other (possibly running) migrations: never touched."""
+def sweep(vc, vm, proxy, keep=None):
+    """Crash recovery for THIS source VM only: our leftover snapshots on it (but
+    `keep`, a group's consistent point this cycle copies from) and its disks still
+    hot-added to the proxy. Disks of other source VMs on the same appliance belong
+    to other (possibly running) migrations: never touched."""
     done = []
     wait_idle(vm)
     if proxy is not None:
@@ -655,7 +670,7 @@ def sweep(vc, vm, proxy):
                 done.append(f"detached stale {d.backing.fileName}")
     if vm.snapshot:
         for snap in _walk_snaps(vm.snapshot.rootSnapshotList):
-            if snap.name.startswith(SNAP_PREFIX):
+            if snap.name.startswith(SNAP_PREFIX) and snap.name != keep:
                 task(snap.snapshot.RemoveSnapshot_Task, False)
                 done.append(f"removed stale snapshot {snap.name}")
     return done
@@ -680,14 +695,44 @@ def _clone(reader):
     return reader.clone()
 
 
-def push_extents(reader, nbd, extents, workers=4):
-    """Read extents with `workers` parallel readers; write to NBD as they complete."""
-    sent = zeros = 0
+def _prepare(buf, level, probe):
+    """[(offset in buf, length, kind, payload)] per CHUNK: kind z (all zeros: no
+    payload), c (zlib stream) or r (raw). `probe` is a shared {"miss": n} counter:
+    after 8 chunks in a row that did not shrink, only one in 8 is tried."""
+    out = []
+    for o in range(0, len(buf), CHUNK):
+        piece = buf[o:o + CHUNK]
+        if piece.count(0) == len(piece):
+            out.append((o, len(piece), "z", None))
+            continue
+        if level is not None and (probe["miss"] < 8 or probe["miss"] % 8 == 0):
+            z = zlib.compress(piece, level)
+            if len(z) < 0.9 * len(piece):
+                probe["miss"] = 0
+                out.append((o, len(piece), "c", z))
+                continue
+            probe["miss"] += 1
+        elif level is not None:
+            probe["miss"] += 1
+        out.append((o, len(piece), "r", piece))
+    return out
+
+
+def push_extents(reader, nbd, extents, workers=4, level=None):
+    """Read extents with `workers` parallel readers (which also compress, with zlib
+    `level`, when the receiver takes compressed writes); write to NBD as they
+    complete. Returns (data bytes, zero bytes, bytes of payload sent)."""
+    sent = zeros = wire = 0
     readers = [reader] + [_clone(reader) for _ in range(workers - 1)]
     pool = cf.ThreadPoolExecutor(max_workers=workers)
     free = list(range(workers))
     pending = {}
     it = iter(extents)
+    probe = {"miss": 0}
+    level = level if getattr(nbd, "zlib", False) else None
+
+    def work(k, s, n):
+        return _prepare(readers[k].read(s, n), level, probe)
 
     def submit():
         try:
@@ -695,7 +740,7 @@ def push_extents(reader, nbd, extents, workers=4):
         except StopIteration:
             return False
         k = free.pop()
-        pending[pool.submit(readers[k].read, s, n)] = (k, s, n)
+        pending[pool.submit(work, k, s, n)] = (k, s, n)
         return True
 
     while free and submit():
@@ -704,17 +749,18 @@ def push_extents(reader, nbd, extents, workers=4):
         done, _ = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
         for fut in done:
             k, s, n = pending.pop(fut)
-            buf = fut.result()
+            pieces = fut.result()
             free.append(k)
-            for o in range(0, n, CHUNK):
-                piece = buf[o:o + CHUNK]
-                if piece.count(0) == len(piece):
-                    nbd.write_zeroes(s + o, len(piece)); zeros += len(piece)
+            for o, ln, kind, payload in pieces:
+                if kind == "z":
+                    nbd.write_zeroes(s + o, ln); zeros += ln
+                elif kind == "c":
+                    nbd.zwrite(s + o, ln, payload); sent += ln; wire += len(payload) + 4
                 else:
-                    nbd.write(s + o, piece); sent += len(piece)
+                    nbd.write(s + o, payload); sent += ln; wire += ln
             submit()
     pool.shutdown()
-    return sent, zeros
+    return sent, zeros, wire
 
 
 def parse_map(s):
@@ -747,8 +793,57 @@ def open_reader(vc, vm, transport, proxy, sd):
     return contextlib.nullcontext(FlatReader(vc, vm, sd.backing.fileName))
 
 
+def snapshot_many(vms, name, quiesce=False, strict=False):
+    """One snapshot `name` on every VM, as close together as vSphere allows: every
+    CreateSnapshot is issued before any is waited for. quiesce: through VMware Tools
+    (VSS, fsfreeze); a VM that cannot quiesce gets a crash-consistent snapshot and
+    the reason, unless strict (then every snapshot is removed and the fault raised).
+    Returns ({vm name: {"quiesced", "reason", "start", "end"}}, spread in seconds:
+    first start to last completion, vCenter's clock)."""
+    for vm in vms:
+        wait_idle(vm)
+    tasks = {vm: vm.CreateSnapshot_Task(name, "exo-v2v consistent point", False, quiesce) for vm in vms}
+    out, failed = {}, {}
+    for vm, t in tasks.items():
+        try:
+            WaitForTask(t)
+            out[vm.name] = {"quiesced": quiesce, "reason": None, "task": t}
+        except vmodl.MethodFault as e:
+            failed[vm] = getattr(e, "msg", None) or type(e).__name__
+    for vm, why in failed.items():
+        if not quiesce or strict:
+            break
+        log(f"{vm.name}: no quiesced snapshot ({why}): crash-consistent instead")
+        t = vm.CreateSnapshot_Task(name, "exo-v2v consistent point", False, False)
+        WaitForTask(t)
+        out[vm.name] = {"quiesced": False, "reason": why, "task": t}
+    if failed and (not quiesce or strict):
+        for vm in tasks:
+            remove_named(vm, name)
+        raise RuntimeError("snapshot failed: " + "; ".join(f"{vm.name}: {w}" for vm, w in failed.items()))
+    starts, ends = [], []
+    for v in out.values():
+        info = v.pop("task").info
+        v["start"], v["end"] = info.startTime.timestamp(), info.completeTime.timestamp()
+        starts.append(v["start"]); ends.append(v["end"])
+    return out, round(max(ends) - min(starts), 1)
+
+
+def remove_named(vm, name):
+    """Remove every snapshot called `name` on vm (crash cleanup of a consistent point)."""
+    n = 0
+    if vm.snapshot:
+        for s in _walk_snaps(vm.snapshot.rootSnapshotList):
+            if s.name == name:
+                task(s.snapshot.RemoveSnapshot_Task, False)
+                n += 1
+    return n
+
+
 def sync(vc, vm, mapping, nbd_addr, api_base, full=False, final=False, shutdown_timeout=300, workers=4,
-         transport="hotadd", proxy=None):
+         transport="hotadd", proxy=None, pacer=None, snapshot_name=None):
+    """One cycle. pacer(final) -> a wan.Pacer per disk (the WAN limit and compression), or None.
+    snapshot_name: copy from that existing snapshot (a group's consistent point) and remove it."""
     cycle = {"vm": vm.name, "final": final, "transport": transport, "disks": {}}
     t_cycle = time.time()
     if final:
@@ -768,7 +863,14 @@ def sync(vc, vm, mapping, nbd_addr, api_base, full=False, final=False, shutdown_
     snapless = final and vm.runtime.powerState == vim.VirtualMachinePowerState.poweredOff \
         and not vm.snapshot
     snap = None
-    if not snapless:
+    if snapshot_name and not final:
+        hits = [s.snapshot for s in _walk_snaps(vm.snapshot.rootSnapshotList) if s.name == snapshot_name] \
+            if vm.snapshot else []
+        if not hits:
+            sys.exit(f"snapshot {snapshot_name} is not on {vm.name}")
+        snap = hits[0]
+        cycle.update(snapshot_name=snapshot_name, consistent=True)
+    elif not snapless:
         name = f"{SNAP_PREFIX}-{int(time.time())}"
         task(vm.CreateSnapshot_Task, name, "exo-v2v replication point", False, False)
         snap = [s.snapshot for s in _walk_snaps(vm.snapshot.rootSnapshotList) if s.name == name][0]
@@ -805,7 +907,9 @@ def sync(vc, vm, mapping, nbd_addr, api_base, full=False, final=False, shutdown_
                 prev = "*"
             covered = sum(n for _s, n in ext)
             ranges = coalesce(ext)
-            nbd = P.Client(host, int(port), export, window=16)
+            pc = pacer(final) if pacer else None
+            nbd = P.Client(host, int(port), export, window=16,
+                           compress=bool(pc and pc.compress()), pacer=pc)
             if nbd.size < sd.capacityInBytes:
                 sys.exit(f"{export}: receiver disk {nbd.size} < source {sd.capacityInBytes}")
             if prev == "*":
@@ -819,18 +923,29 @@ def sync(vc, vm, mapping, nbd_addr, api_base, full=False, final=False, shutdown_
                     for o in range(0, n, P.MAX_REQUEST):
                         nbd.write_zeroes(s + o, min(P.MAX_REQUEST, n - o))
             with open_reader(vc, vm, transport, proxy, sd) as reader:
-                sent, zeros = push_extents(reader, nbd, ranges, workers)
+                sent, zeros, wire = push_extents(reader, nbd, ranges, workers,
+                                                 level=pc.cfg["level"] if pc else None)
             nbd.flush(); nbd.close()
             new_id = getattr(sd.backing, "changeId", None) or prev
             api(api_base, "POST", f"/meta?export={export}",
                 {"change_id": new_id, "capacity": sd.capacityInBytes, "vm": vm.name, "disk": d,
                  "synced_at": time.time(), "final": final})
             dt = time.time() - t0
-            cycle["disks"][d] = {"export": export, "mode": "full" if prev == "*" else "delta",
-                                 "extents": len(ext), "covered": covered, "sent": sent, "zeros": zeros,
-                                 "seconds": round(dt, 1), "mib_s": round(covered / dt / 2**20, 1) if dt else 0}
-            log(f"{d} -> {export}: {cycle['disks'][d]['mode']} {len(ext)} extents, "
-                f"{covered / 2**20:.0f} MiB covered, {sent / 2**20:.0f} MiB data, {dt:.1f}s")
+            info = cycle["disks"][d] = {
+                "export": export, "mode": "full" if prev == "*" else "delta",
+                "extents": len(ext), "covered": covered, "sent": sent, "zeros": zeros,
+                "seconds": round(dt, 1), "mib_s": round(covered / dt / 2**20, 1) if dt else 0,
+                "wire": wire, "wire_mib_s": round(wire / dt / 2**20, 1) if dt else 0,
+                "compression": ("zlib%d" % pc.cfg["level"] if nbd.zlib else
+                                "unsupported" if pc and pc.compress() else "off")}
+            if pc:
+                info.update(pc.stats())
+            log(f"{d} -> {export}: {info['mode']} {len(ext)} extents, "
+                f"{covered / 2**20:.0f} MiB covered, {sent / 2**20:.0f} MiB data"
+                + (f", {wire / 2**20:.0f} MiB sent compressed" if nbd.zlib else "")
+                + (f", throttled {info['throttled_s']:.0f}s at {info['limit_bps'] * 8 / 1e6:.0f} Mbit/s"
+                   if pc and pc.bps else "")
+                + f", {dt:.1f}s")
     finally:
         if snap is not None:
             task(snap.RemoveSnapshot_Task, False)

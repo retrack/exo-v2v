@@ -825,8 +825,10 @@ NETFIX_SH = r'''#!/bin/sh
 # networking: re-point interface configs written for VMware NIC names/MACs at
 # the NICs that exist now. Idempotent; log /var/log/v2v-netfix.log.
 # /etc/v2v-netfix.map (from the migration plan), one line per Exoscale NIC:
-#   <mac> static <addr>/<len> [nogw]   the config holding <addr> moves to this NIC
+#   <mac> static <addr>/<len> [nogw] [from=<old>]   the config holding <addr> (or
+#                                      <old>, renumbered to <addr>) moves to this NIC
 #   <mac> dhcp                         this NIC gets a DHCP config if it has none
+#   <mac> eip <addr>/32                an Elastic IP (v2v-eip.service puts it on lo)
 R="${V2V_ROOT:-}"; SYS="${V2V_SYS:-/sys}"
 LOG="$R/var/log/v2v-netfix.log"; mkdir -p "$R/var/log"
 exec >>"$LOG" 2>&1
@@ -857,6 +859,7 @@ names() {
     for f in $NETPLAN; do awk '/^[[:space:]]*ethernets:/{e=1;ind=-1;next} e&&/^[^[:space:]]/{e=0} e&&/^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/{n=match($0,/[^ ]/); if(ind<0)ind=n; if(n==ind){sub(/^[[:space:]]+/,"");sub(/:.*/,"");print}}' "$f"; done
     for f in $NMKEY; do sed -n 's/^interface-name=//p' "$f"; done
     for f in $IFCFG; do sed -n 's/^DEVICE=["]*\([^"]*\)["]*$/\1/p' "$f"; done
+    for f in $NETWORKD; do sed -n 's/^Name=//p' "$f" | grep -v '[]*?[ ]'; done
   } | grep -v '^lo$' | grep -v ':' | sort -u
 }
 nic_by_mac() { for n in $NICS; do [ "$(macof "$n")" = "$1" ] && { echo "$n"; return; }; done; }
@@ -867,6 +870,13 @@ holder() {   # the configured interface whose static config carries address $1
   for f in $NETPLAN; do awk -v re="(^|[^0-9.])$ae/" '/^[[:space:]]*ethernets:/{e=1;ind=-1;next} e&&/^[^[:space:]]/{e=0} e&&/^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/{n=match($0,/[^ ]/); if(ind<0)ind=n; if(n==ind){c=$0;sub(/^[[:space:]]+/,"",c);sub(/:.*/,"",c)}} e&&c!=""&&$0~re{print c; exit}' "$f"; done
   for f in $NMKEY; do grep -qE "^address[0-9]*=$ae(/|,|\$)" "$f" && sed -n 's/^interface-name=//p' "$f"; done
   for f in $IFCFG; do grep -qE "^IPADDR[0-9]*=[\"']?$ae[\"']?\$" "$f" && sed -n 's/^DEVICE=["]*\([^"]*\)["]*$/\1/p' "$f"; done
+  for f in $NETWORKD; do grep -qE "^Address=$ae(/|\$)" "$f" && sed -n 's/^Name=//p' "$f" | grep -v '[]*?[ ]' | head -1; done
+}
+readdr() {   # renumber: address $1 becomes $2 wherever a network config names it
+  ae=$(re_ip "$1")
+  for f in $IFUP $NETPLAN $NMKEY $IFCFG $NETWORKD "$R/etc/hosts"; do
+    [ -f "$f" ] && grep -qE "(^|[^0-9.])$ae([^0-9.]|\$)" "$f" && sed -i -E "s/(^|[^0-9.])$ae([^0-9.]|\$)/\1$2\2/g" "$f"
+  done
 }
 rename() {
   for f in $IFUP $NETPLAN $IFCFG $NETWORKD; do [ -f "$f" ] && sed -i -E "s/(^|[^A-Za-z0-9._-])$1([^A-Za-z0-9._-]|$)/\1$2\2/g" "$f"; done
@@ -881,9 +891,15 @@ if [ -f "$MAP" ]; then
     case "$mac" in ""|\#*) continue;; esac
     mac=$(echo "$mac" | tr 'A-Z' 'a-z'); new=$(nic_by_mac "$mac")
     [ -n "$new" ] || { echo "map: no NIC with MAC $mac"; continue; }
+    [ "$kind" = eip ] && continue
     [ "$kind" = static ] || { DHCPW="$DHCPW $new"; continue; }
     CLAIMED="$CLAIMED $new"
-    ip=${addr%/*}; ae=$(re_ip "$ip")
+    ip=${addr%/*}; nogw=""; from=""
+    for o in $opt; do case "$o" in nogw) nogw=1;; from=*) from=${o#from=};; esac; done
+    if [ -n "$from" ] && [ "$from" != "$ip" ] && [ -n "$(holder "$from" | head -1)" ]; then
+      readdr "$from" "$ip"; echo "map: $from renumbered $ip"
+    fi
+    ae=$(re_ip "$ip")
     for f in $NMKEY; do   # a profile bound by MAC only: bind it by name (the VMware MAC pin goes below)
       grep -qE "^address[0-9]*=$ae(/|,|\$)" "$f" && ! grep -q '^interface-name=' "$f" && sed -i "/^\[connection\]/a interface-name=$new" "$f"
     done
@@ -892,7 +908,7 @@ if [ -f "$MAP" ]; then
       echo "map: no config holds $ip: DHCP on $new (its static lease is $ip)"; DHCPW="$DHCPW $new"; continue
     fi
     [ "$old" = "$new" ] || RENAMES="$RENAMES $old=$new"
-    [ "$opt" = nogw ] && NOGW="$NOGW $new"
+    [ -n "$nogw" ] && NOGW="$NOGW $new"
   done < "$MAP"
   k=0; for m in $RENAMES; do rename "${m%%=*}" "v2vtmp$k"; k=$((k+1)); done
   k=0; for m in $RENAMES; do rename "v2vtmp$k" "${m#*=}"; echo "map ${m%%=*} -> ${m#*=} (holds its address)"; k=$((k+1)); done
@@ -1098,7 +1114,63 @@ for ($i = 0; $i -lt 90; $i++) {
 }
 exit 1
 """
+WIN_EIP_PS1 = r"""# exo-v2v: the Elastic IPs of this instance. Windows adds no address to an
+# interface on DHCP, so the public NIC becomes static with what its DHCP lease
+# gave (address, gateway, DNS servers: an Exoscale instance keeps its public IP),
+# plus each Elastic IP as a /32 that is never used as a source. If a step fails
+# once DHCP is off, DHCP comes back and the next round tries again. Retries until
+# the virtio adapter has its lease, then removes its task.
+$mac = "{mac}"
+$eips = @({eips})
+$log = "$env:ProgramData\exo-v2v\elastic-ip.log"
+function Note($m) { "$(Get-Date -Format o) $m" | Add-Content $log }
+for ($i = 0; $i -lt 90; $i++) {
+  $a = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.MacAddress -eq $mac }
+  if ($a) {
+    $have = @(Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)
+    if (-not ($eips | Where-Object { $_ -notin $have.IPAddress })) {
+      Note "done: $($eips -join ', ') on $($a.Name)"
+      schtasks /delete /tn exo-v2v-elastic-ip /f | Out-Null
+      exit 0
+    }
+    $lease = $have | Where-Object { $_.PrefixOrigin -eq "Dhcp" } | Select-Object -First 1
+    $route = Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix 0.0.0.0/0 -ErrorAction SilentlyContinue |
+      Sort-Object RouteMetric | Select-Object -First 1
+    if ($lease -and $route) {
+      $dns = (Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4).ServerAddresses
+      try {
+        Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Disabled -ErrorAction Stop
+        $have | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+        Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix 0.0.0.0/0 -ErrorAction SilentlyContinue |
+          Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress $lease.IPAddress -PrefixLength $lease.PrefixLength `
+          -DefaultGateway $route.NextHop -ErrorAction Stop | Out-Null
+        if ($dns) { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses $dns -ErrorAction Stop }
+        foreach ($e in $eips) {
+          New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress $e -PrefixLength 32 -SkipAsSource $true -ErrorAction Stop | Out-Null
+        }
+        Note "$($a.Name): static $($lease.IPAddress)/$($lease.PrefixLength) via $($route.NextHop), dns $($dns -join ','), elastic $($eips -join ', ')"
+        continue
+      } catch {
+        Note "failed: $($_.Exception.Message): DHCP back on $($a.Name)"
+        Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Enabled -ErrorAction SilentlyContinue
+        Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
+      }
+    }
+  }
+  Start-Sleep -Seconds 10
+}
+exit 1
+"""
 WIN_FIRSTBOOT = "/Program Files/Guestfs/Firstboot/scripts"
+
+
+def win_eip_ps1(netmap):
+    rows = [e for e in netmap or [] if e.get("mode") == "eip"]
+    if not rows:
+        return None
+    return WIN_EIP_PS1.replace("{mac}", rows[0]["mac"].upper().replace(":", "-")) \
+        .replace("{eips}", ", ".join(f'"{e["ip"]}"' for e in rows))
 
 
 def win_static_ps1(netmap):
@@ -1118,6 +1190,11 @@ def winfix(root_disk, root, env, netmap=None):
             files.append(("static-ip.ps1", static, "9010-exo-v2v-static-ip.bat",
                           WIN_TASK_BAT.format(ps1="static-ip.ps1", bat="9010-exo-v2v-static-ip.bat",
                                               task="exo-v2v-static-ip")))
+        eip = win_eip_ps1(netmap)
+        if eip:
+            files.append(("elastic-ip.ps1", eip, "9020-exo-v2v-elastic-ip.bat",
+                          WIN_TASK_BAT.format(ps1="elastic-ip.ps1", bat="9020-exo-v2v-elastic-ip.bat",
+                                              task="exo-v2v-elastic-ip")))
         script = (f"run\nmount {root} /\n"
                   f"is-dir \"{WIN_FIRSTBOOT}\"\n")
         rc, out, err = _guestfish(["-a", root_disk], script, env)
@@ -1132,8 +1209,28 @@ def winfix(root_disk, root, env, netmap=None):
         rc, out, err = _guestfish(["-a", root_disk], "\n".join(lines) + "\n", env)
         if rc:
             return {"applied": False, "reason": err.strip()[-300:]}
-    fix = "online disks (SAN policy OnlineAll)" + (", static addresses on the private networks" if static else "")
+    fix = "online disks (SAN policy OnlineAll)" + (", static addresses on the private networks" if static else "") \
+        + (", Elastic IPs on the public NIC (made static)" if eip else "")
     return {"applied": True, "root": root, "distro": "windows", "fix": fix}
+
+
+EIP_UNIT = """[Unit]
+Description=v2v: Elastic IPs on the loopback interface (Exoscale)
+After=network.target NetworkManager.service systemd-networkd.service networking.service network.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for a in $$(grep -v "^#" /etc/v2v-eip.list); do ip addr replace "$$a" dev lo; done'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def eips_of(netmap):
+    return [e["ip"] for e in netmap or [] if e.get("mode") == "eip"]
 
 
 def netfix_map(netmap):
@@ -1141,7 +1238,10 @@ def netfix_map(netmap):
     out = []
     for e in netmap or []:
         if e.get("mode") == "static":
-            out.append(f"{e['mac']} static {e['ip']}/{e['prefix']}" + (" nogw" if e.get("nogw") else ""))
+            out.append(f"{e['mac']} static {e['ip']}/{e['prefix']}" + (" nogw" if e.get("nogw") else "")
+                       + (f" from={e['from']}" if e.get("from") and e["from"] != e["ip"] else ""))
+        elif e.get("mode") == "eip":
+            out.append(f"{e['mac']} eip {e['ip']}/32")
         else:
             out.append(f"{e['mac']} dhcp")
     return "# exo-v2v: Exoscale NIC MAC -> network config (public NIC first)\n" + "\n".join(out) + "\n" \
@@ -1173,26 +1273,32 @@ def netfix(root_disk, netmap=None):
              ("/etc/systemd/system/v2v-netfix.service", NETFIX_UNIT, "0644", "systemd_unit_file_t")]
     if netfix_map(netmap):
         files.append(("/etc/v2v-netfix.map", netfix_map(netmap), "0644", "etc_t"))
-    wants = "/etc/systemd/system/multi-user.target.wants/v2v-netfix.service"
+    links = ["v2v-netfix.service"]
+    if eips_of(netmap):     # Exoscale's way: the Elastic IP on lo; replies leave from it
+        files += [("/etc/v2v-eip.list", "# exo-v2v: Elastic IPs (on lo, at every boot)\n"
+                   + "".join(f"{a}/32\n" for a in eips_of(netmap)), "0644", "etc_t"),
+                  ("/etc/systemd/system/v2v-eip.service", EIP_UNIT, "0644", "systemd_unit_file_t")]
+        links.append("v2v-eip.service")
+    wants = "/etc/systemd/system/multi-user.target.wants/"
     with tempfile.TemporaryDirectory() as td:
         lines = ["mkdir-p /usr/local/sbin", "mkdir-p /etc/systemd/system/multi-user.target.wants"]
         for i, (path, body, mode, _t) in enumerate(files):
             local = os.path.join(td, f"f{i}")
             open(local, "w").write(body)
             lines += [f"upload {local} {path}", f"chmod {mode} {path}"]
-        lines.append(f"ln-sf ../v2v-netfix.service {wants}")
+        lines += [f"ln-sf ../{u} {wants}{u}" for u in links]
         if selinux:  # label just these files: no full relabel / extra reboot
             for path, _b, _m, t in files:
                 ctx = f"system_u:object_r:{t}:s0"
                 lines.append(f'setxattr security.selinux "{ctx}" {len(ctx) + 1} {path}')
             ctx = "system_u:object_r:systemd_unit_file_t:s0"
-            lines.append(f'lsetxattr security.selinux "{ctx}" {len(ctx) + 1} {wants}')
+            lines += [f'lsetxattr security.selinux "{ctx}" {len(ctx) + 1} {wants}{u}' for u in links]
         # -i mounts the guest's own fstab (separate /usr, /etc on LVM, ...)
         rc, out, err = _guestfish(["-a", root_disk, "-i"], "\n".join(lines) + "\n", env)
         if rc:
             return {"applied": False, "reason": err.strip()[-300:]}
     return {"applied": True, "root": root, "distro": distro, "selinux_labelled": selinux,
-            "map": netfix_map(netmap)}
+            "map": netfix_map(netmap), "elastic_ips": eips_of(netmap)}
 
 
 def main():

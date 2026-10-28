@@ -1,6 +1,6 @@
 # Moving an application (groups)
 
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A group moves several VMs that work together, for example a load balancer, a
 few application servers and a database, as one unit. Every VM is replicated
@@ -77,7 +77,7 @@ networks:                               # vSphere port group -> Exoscale
 
 security_groups:                        # created by `group create` when missing
   v2v-shop-web: [tcp/80 0.0.0.0/0, tcp/443 0.0.0.0/0]
-  v2v-shop-closed: []                   # no ingress at all
+  v2v-shop-closed: ["tcp/5432 sg:v2v-shop-closed"]   # a CIDR or sg:GROUP as source
 
 anti_affinity:
   app: [app01, app02]                   # different hypervisors (set at creation)
@@ -100,10 +100,15 @@ vms:
     security_groups: [v2v-shop-web]
     health: {http: "http://{public_ip}/", expect: "beats"}
     name: lb01                          # renamed at cleanup (default: v2v-shop-lb01)
+    public: {elastic_ip: new, reverse_dns: shop.example.com}
+
+dns:                                    # Exoscale DNS: switched once the last tier is healthy
+  ttl: 60
+  records: {www.example.com: lb01}
 
 hooks:
   pre_cutover: ./maintenance-page.sh on
-  post_cutover: ./switch-dns.sh {lb01.public_ip}
+  post_cutover: ./notify.sh {lb01.address}
 
 cutover:
   parallel: 8                           # member cutovers at a time
@@ -124,16 +129,23 @@ rehearsal:                              # see Rehearsal
 | `networks.NAME.type` | `public`: the instance's public interface, DHCP. `private`: an Exoscale managed private network |
 | `networks.NAME.cidr` | The subnet of a private network. The top host address (`.254` of a /24) belongs to Exoscale's DHCP server: a VM using it must be renumbered |
 | `networks.NAME.exoscale_name` | An existing private network to use instead of creating `v2v-GROUP-NAME` (the appliance role only attaches `v2v-*` networks) |
+| `networks.NAME.renumber` | A new subnet of the same size: every member keeps its host part there, and the guests' configurations are rewritten ([renumbering](public.md#renumbering-private-addresses)) |
 | `vms[].tier` | 1 = back end. Members of a tier stop and start together |
-| `vms[].ip` | `{NETWORK: ADDRESS}` when VMware Tools do not report the address |
+| `vms[].ip` | `{NETWORK: ADDRESS}` when VMware Tools do not report the address, or to give the VM a new one (renumbered in the guest) |
+| `vms[].public` | `elastic_ip: new` or an existing Elastic IP, `reverse_dns: NAME` ([Public IPs and DNS](public.md)) |
 | `vms[].security_groups` | Attached at cutover. Existing groups, or ones defined under `security_groups:` |
 | `vms[].health` | `tcp: PORT`, `http: URL` (2xx/3xx, optional `expect: TEXT` in the body), `command: SHELL` (exit 0), `timeout` |
 | `vms[].name` | The instance's final name, applied by `group cleanup` |
 | `vms[]` other keys | As the `plan` options: `instance_type`, `system_disk`, `receiver_template`, `receiver_template_visibility`, `fold`, `no_fold` |
+| `dns` | `ttl` and `records: {FQDN: VM}`: A records of Exoscale DNS zones pointed at the member's Elastic IP (or instance IP) at cutover |
+| `security_groups` | `{NAME: [RULE, ...]}`, a rule `tcp/PORT[-PORT] SOURCE`, `udp/...` or `icmp SOURCE`, the source a CIDR or `sg:GROUP`. `group plan` shows how existing groups differ; `group create --update-rules` adds what they miss |
+
+Unknown top-level keys are refused (a typo would otherwise be ignored).
 
 Placeholders in health checks and hooks: `{public_ip}`, `{private_ip}`,
-`{ip.NETWORK}` (the member's own), and `{VM.public_ip}`, `{VM.private_ip}`,
-`{VM.ip.NETWORK}` for any member. Hooks also get `V2V_GROUP`, `V2V_STEP` and
+`{ip.NETWORK}`, `{elastic_ip}`, `{address}` (the Elastic IP, or the public IP
+without one) for the member's own, and `{VM.public_ip}`, `{VM.address}`, ...
+for any member. Hooks also get `V2V_GROUP`, `V2V_STEP` and
 `V2V_<VM>_PUBLIC_IP` / `V2V_<VM>_PRIVATE_IP` in their environment, and run in
 the manifest's directory.
 
@@ -162,8 +174,9 @@ ports) until `cleanup`. Traffic between members on a private network is not
 filtered by security groups.
 
 The load balancer's public IP is its receiver's IP, known from `group create`
-on, so DNS can be prepared before the window. Elastic IPs are not handled
-(they need configuration in the guest).
+on, so DNS can be prepared before the window. An [Elastic IP](public.md) is
+known from `group create` too and outlives the instance; DNS records on
+Exoscale DNS can be switched by the cutover itself (`dns:`).
 
 Static DNS servers in the guests' configurations are kept. If they are on
 premises, change them before the cutover or in the `post_cutover` hook.
@@ -184,7 +197,11 @@ premises, change them before the cutover or in the `post_cutover` hook.
 6. **Instances stopped and resized** to their final types.
 7. **Start, back to front.** Tier 1 starts and its health checks must pass, then
    tier 2, and so on.
-8. **`post_cutover` hook**, then the report: the window and each member's downtime.
+8. **DNS records** (`dns:`) pointed at the new addresses; the cutover waits
+   until Exoscale's nameservers serve them (at most 3 minutes, see
+   [DNS records](public.md#dns-records)).
+9. **`post_cutover` hook**, then the report: the window (first stop to the last
+   tier healthy) and each member's downtime.
 
 If a step fails, the cutover stops there and prints the state. The members that
 were converting finish first, so each one stops in a consistent state. Then
@@ -221,6 +238,6 @@ and security groups `group create` made.
 ## Limits
 
 - One appliance replicates every member: it must see all their datastores.
-- Members are listed by name (`--vm`); selecting by vCenter folder or tag comes later.
+- Members are listed by name or path (`--vm`), by vCenter folder or tag (`group discover`).
 - One zone per group.
-- Managed private networks only (no VPC subnets yet); no Elastic IPs.
+- Managed private networks only (no VPC subnets yet).

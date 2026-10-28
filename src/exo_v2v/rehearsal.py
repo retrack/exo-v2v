@@ -496,13 +496,40 @@ python3 $D/rootcopy.py /dev/vda 127.0.0.1:{port} sda 4 --overlay {root} --mask-c
     return res
 
 
-def seed(rh, x, st, sh, ex, timeout, port):
+def consistent_point(rh, members, consistent, accept=False):
+    """Before seeding: every member's replica at one point (see group.consistent_cycle).
+    A resumed rehearsal redoes it while nothing is seeded; once some copies are, the
+    others must not have moved past it."""
+    cons = rh.data.get("consistency")
+    seeded = [m for m in members if State.load(shadow_name(m["migration"])).data.get("seeded")]
+    if cons is None or not seeded:
+        rec, locks = consistent()
+        rh.data["consistency"] = rec
+        rh.save()
+        rh.event(f"consistent point {rec['snapshot']}: spread {rec['spread_s']}s, {rec['mode']}")
+        return locks
+    moved = [m["vm"] for m in members if m not in seeded and
+             ((State.load(m["migration"])["cycles"] or [{}])[-1].get("snapshot_name") != cons["snapshot"])]
+    if moved and not accept:
+        raise RehearsalFailure(f"{', '.join(moved)} replicated past the consistent point since seeding began: "
+                               f"`exo-v2v rehearsal destroy {rh.name}` and rehearse again, or --accept-inconsistent")
+    if moved:
+        cons["inconsistent"] = moved
+        rh.save()
+        rh.event(f"WARNING seeding resumed with {', '.join(moved)} past the consistent point (--accept-inconsistent)")
+    return {}
+
+
+def seed(rh, x, st, sh, ex, timeout, port, lk=None):
     """Volumes from snapshots of the production volumes, then the root disk,
-    with the production migration's lock held: one point in its replication."""
+    with the production migration's lock held: one point in its replication
+    (lk: the lock a group's consistent point still holds; released here)."""
     from .cli import install_agent, wait_receiver, win_support, tunnel_for
     if sh.data.get("seeded"):
+        if lk:
+            lk.close()
         return
-    lk = wait_lock(st, f"rehearsal {rh.name}")
+    lk = lk or wait_lock(st, f"rehearsal {rh.name}")
     try:
         t0 = time.time()
         r, sr = st["receiver"], sh["receiver"]
@@ -685,8 +712,10 @@ def preflight(rh, sts, ex):
     return problems
 
 
-def rehearse(name, members, settings, zone, a):
-    """members: [{"vm", "migration", "tier", "health"}]."""
+def rehearse(name, members, settings, zone, a, consistent=None):
+    """members: [{"vm", "migration", "tier", "health"}]. consistent: a callable
+    that brings every member's replica to one point in time and returns (record,
+    {migration: held lock}) - group rehearsals with --consistent."""
     from .cli import sender_cidr
     rh = Rehearsal.load(name, must=False)
     if rh.active and rh.data.get("state") == "ready":
@@ -755,8 +784,17 @@ def rehearse(name, members, settings, zone, a):
                     rh.data["seed_rules"].append(ip)
                     rh.save()
             ports = {m["vm"]: 10900 + i for i, m in enumerate(members)}
-            res = parallel(lambda m: seed(rh, m, sts[m["vm"]], State.load(shadow_name(m["migration"])), ex,
-                                          a.timeout, ports[m["vm"]]), members, workers=4)
+            locks = {}
+            if consistent:
+                locks = consistent_point(rh, members, consistent, getattr(a, "accept_inconsistent", False))
+                sts = {m["vm"]: State.load(m["migration"]) for m in members}
+            try:
+                res = parallel(lambda m: seed(rh, m, sts[m["vm"]], State.load(shadow_name(m["migration"])), ex,
+                                              a.timeout, ports[m["vm"]], lk=locks.pop(m["migration"], None)),
+                               members, workers=4 if not locks else len(members))
+            finally:
+                for lk in locks.values():
+                    lk.close()
             bad = {k: v for k, v in res.items() if v}
             if bad:
                 raise RehearsalFailure(f"seeding failed: {bad}")
@@ -857,6 +895,7 @@ def build_report(rh):
     boots = sum(max([r["boot_s"] or 0 for r in rows if r["tier"] == t] or [0]) for t in tiers)
     predicted = (max(conv) + boots + 15 * len(tiers)) if conv else None
     return {"t": time.time(), "members": rows, "predicted_window_s": predicted,
+            "consistency": rh.data.get("consistency"),
             "dns": dns_queries(rh) if rh.data.get("relay", {}).get("ip") else {}}
 
 
@@ -869,6 +908,18 @@ def print_report(rh):
         f = lambda v: f"{v}s" if v is not None else "-"
         print(f"  {r['tier']:<4} {r['vm']:<12} {f(r['seed_s']):>7} {f(r['convert_s']):>8} {f(r['boot_s']):>6}  "
               f"{(r['address'] or '-'):<16} {'ok' if h.get('ok') else 'FAILED' if h else '-'} {h.get('detail', '')}")
+    c = rep.get("consistency")
+    if c:
+        print(f"  consistent point: {c['snapshot']}, snapshots within {c['spread_s']}s, {c['mode']}"
+              + "".join(f"; {vm}: not quiesced ({v['reason']})" for vm, v in c["members"].items()
+                        if c.get("quiesce") and not v["quiesced"]))
+        slow = sorted(((v.get("end_s", 0), vm) for vm, v in c["members"].items()), reverse=True)[:3]
+        if slow and slow[0][0]:
+            print("    slowest snapshots done at " + ", ".join(f"{vm} +{t}s" for t, vm in slow))
+        if c.get("inconsistent"):
+            print(f"    seeded past the point: {', '.join(c['inconsistent'])}")
+    else:
+        print("  members seeded from their own last cycles (not one point in time: --consistent)")
     if rep.get("predicted_window_s"):
         print(f"  predicted cutover window: ~{rep['predicted_window_s'] // 60} min "
               f"(last delta + measured conversion of the slowest member + boots per tier)")

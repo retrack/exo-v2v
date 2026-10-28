@@ -40,6 +40,8 @@ nav:
       - Moving an application: groups.md
       - Rehearsal: rehearsal.md
       - Web status page: web.md
+      - Public IPs and DNS: public.md
+      - Actions, API and MCP: api.md
   - Reference:
       - Supported operating systems: supported-os.md
       - Limitations: limitations.md

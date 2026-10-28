@@ -24,17 +24,16 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
 
 from . import __version__
-from . import alerts, service
+from . import alerts, public, service, wan
 from . import plan as planmod
 from . import userdata
 from .exo import Exo, ExoError, volume_size_gb
-from .state import State
+from .state import BadName, State, check_name
 from .tunnel import Tunnel
 from . import util
 from .util import die, gib_ceil, human, log
@@ -98,6 +97,18 @@ def print_plan(p):
                  else f"{d['size_gb']} GB")
         print(f"  {d['disk']:<9} {d['label']:<14} {human(d['capacity']):>10} -> {d['role']:<6} "
               f"{where} (export {d['export']})")
+    pub = p.get("public") or {}
+    if pub.get("elastic_ip"):
+        print(f"  public: Elastic IP {'(new, reserved at create)' if pub['elastic_ip'] == 'new' else pub['elastic_ip']}"
+              ", attached and configured in the guest at cutover")
+    if pub.get("reverse_dns"):
+        print(f"  reverse DNS: {pub['reverse_dns']}")
+    for n in pub.get("dns_records") or []:
+        print(f"  DNS {n}: A record -> {'the Elastic IP' if pub.get('elastic_ip') else 'the instance'} at cutover "
+              f"(TTL {pub.get('dns_ttl', 60)}s from create on)")
+    for n in p.get("networks") or []:
+        if n.get("from"):
+            print(f"  renumbered: {n['from']} -> {n['ip']} on {n['network']}")
     for k in ("errors", "warnings", "notes"):
         for m in p[k]:
             print(f"  {k[:-1].upper()}: {m}")
@@ -120,6 +131,7 @@ def vsphere_warnings(V, vc, vm):
 
 
 def cmd_plan(a):
+    check_name(a.name)
     V, vc = vsphere_connect(a)
     try:
         vm = vc.vm(a.vm)
@@ -139,11 +151,26 @@ def cmd_plan(a):
                       fold=a.fold or [], auto_fold=not a.no_fold)
     p["inventory"] = inv
     p["warnings"] += vwarn
+    p["public"] = public_of(a.elastic_ip, a.reverse_dns, a.dns_record, a.dns_ttl, p["errors"])
+    if p["public"]["dns_records"]:
+        p["errors"] += public.check(Exo(a.zone, a.account), p["public"]["dns_records"])
     print_plan(p)
     if p["errors"] and not a.force:
         die("plan has errors (fix them, or --force to record the plan anyway)")
     st = State.new(a.name, p)
     log(f"plan saved: {st.path}")
+
+
+def public_of(elastic_ip=None, reverse_dns=None, dns_records=(), dns_ttl=60, errors=None):
+    """The plan's public side: {elastic_ip: "new"|address|None, reverse_dns, dns_records, dns_ttl}."""
+    import ipaddress
+    if elastic_ip and elastic_ip != "new":
+        try:
+            ipaddress.IPv4Address(elastic_ip)
+        except ValueError:
+            errors.append(f"--elastic-ip {elastic_ip!r}: `new` or an Elastic IP address of the zone")
+    return {"elastic_ip": elastic_ip, "reverse_dns": reverse_dns, "dns_records": list(dns_records or []),
+            "dns_ttl": int(dns_ttl or 60)}
 
 
 def cmd_create(a):
@@ -199,9 +226,27 @@ def cmd_create(a):
     if p["os_family"] == "windows":
         with tunnel_for(st) as t:
             win_support(t)          # staged now: not part of the cutover downtime
+    setup_public(st, ex)
     close_egress(st, ex)
     st.set_phase("receiver-ready")
-    print(f"receiver {name} ready at {st['receiver']['ip']}")
+    print(f"receiver {name} ready at {st['receiver']['ip']}"
+          + (f", Elastic IP {st['receiver']['eip']['ip']} (attached at cutover)" if st["receiver"].get("eip") else ""))
+
+
+def setup_public(st, ex):
+    """create: the Elastic IP reserved, reverse DNS, DNS TTLs lowered (single migrations;
+    a group lowers its DNS records itself)."""
+    pub = st["plan"].get("public") or {}
+    r = st["receiver"]
+    if pub.get("elastic_ip"):
+        public.reserve_eip(st, ex)
+        if not any(n["network"] == "public" for n in r.get("nics", [])):
+            r["nics"] = ex.instance_nics(r["name"])          # the public NIC's MAC, for the guest
+            st.save()
+    public.set_reverse_dns(st, ex)
+    if pub.get("dns_records") and not st.data.get("dns"):
+        st.data["dns"] = public.prepare(ex, [(n, st.name) for n in pub["dns_records"]], pub.get("dns_ttl", 60))
+        st.save()
 
 
 def attach_networks(st, ex):
@@ -233,7 +278,15 @@ def netmap_of(st):
         e = {"mac": macs[n["network"]], "mode": n["mode"]}
         if n.get("ip"):
             e.update(ip=n["ip"], prefix=n["prefix"], nogw=bool(n.get("nogw")))
+        if n.get("from"):
+            e["from"] = n["from"]
         out.append(e)
+    if r.get("eip"):
+        if not macs.get("public"):
+            die("the public NIC's MAC is unknown (`exo-v2v create` records it)")
+        if not out:
+            out.append({"mac": macs["public"], "mode": "dhcp"})
+        out.append({"mac": macs["public"], "mode": "eip", "ip": r["eip"]["ip"], "prefix": 32})
     return out
 
 
@@ -674,7 +727,8 @@ def run_cycle(st, a, V, vc, vm, proxy, t, full=False, final=False):
         status = upgrade_agent(st, t, status.get("version"))
     check_receiver_continuity(st, t, status)
     cyc = V.sync(vc, vm, mapping_of(st), t.nbd, t.api, full=full, final=final,
-                 shutdown_timeout=a.shutdown_timeout, workers=a.workers, transport=a.transport, proxy=proxy)
+                 shutdown_timeout=a.shutdown_timeout, workers=a.workers, transport=a.transport, proxy=proxy,
+                 pacer=lambda final: wan.Pacer(final=final), snapshot_name=getattr(a, "snapshot", None))
     cyc["t"] = time.time()
     st.data["cycles"].append(cyc)
     st.save()
@@ -682,12 +736,22 @@ def run_cycle(st, a, V, vc, vm, proxy, t, full=False, final=False):
     return cyc
 
 
-def migration_lock(st, what):
+def migration_lock(st, what, fd=None):
     """One sync/cutover per migration at a time (the sweep and the receiver's
     changeId assume a single writer). The holder's pid goes into the file: the
-    web page reads it (it never takes the lock)."""
+    web page reads it (it never takes the lock). fd: the lock a group process
+    holds for this child (--lock-fd; the same open file, so the lock is shared:
+    the holder stays the group's, and nothing is unlocked here)."""
     import fcntl
-    lk = open(os.path.join(st.dir, ".lock"), "a+")
+    path = os.path.join(st.dir, ".lock")
+    if fd is not None:
+        if os.fstat(fd).st_ino != os.stat(path).st_ino:
+            die(f"--lock-fd {fd} is not the lock of {st.name}")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.set_inheritable(fd, False)
+        st._lock = os.fdopen(fd, "a+")
+        return
+    lk = open(path, "a+")
     try:
         fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -699,7 +763,13 @@ def migration_lock(st, what):
 
 
 def sender_context(a, st, what):
-    migration_lock(st, what)
+    migration_lock(st, what, getattr(a, "lock_fd", None))
+    try:
+        wan.config()                              # a broken wan: section stops here, not mid-copy
+        if getattr(a, "bwlimit", None):
+            log(f"WAN limit for this run (whole appliance): {wan.human_rate(wan.claim_override(a.bwlimit))}")
+    except wan.WanError as e:
+        die(str(e))
     V, vc = vsphere_connect(a)
     vm = vc.vm_of(st["plan"])
     proxy = None
@@ -714,7 +784,7 @@ def sender_context(a, st, what):
             die("; ".join(errs))
         for w in warns:
             log(f"WARNING {w}")
-    for msg in V.sweep(vc, vm, proxy):
+    for msg in V.sweep(vc, vm, proxy, keep=getattr(a, "snapshot", None)):
         log(f"cleanup: {msg}")
     if not vm.config.changeTrackingEnabled or not all(V.disk_ctk(vm).values()):
         log("enabling CBT on the source VM (VM + every disk)")
@@ -740,6 +810,8 @@ def sync_loop(a, st):
     if st["phase"] not in ("receiver-ready", "syncing"):
         die(f"phase is {st['phase']}: sync needs a ready receiver")
     V, vc, vm, proxy = sender_context(a, st, "sync")
+    if a.snapshot:
+        a.every, a.cycles = None, 1          # one cycle from the group's consistent point
     ex = exo_for(st, a)
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True) or log("stopping after this cycle"))
@@ -911,9 +983,11 @@ def cutover(a):
     if active_for(st.name) and not (a.allow_rehearsal or a.in_group):
         die(f"rehearsal {active_for(st.name)} of {st.name} is up: `exo-v2v rehearsal destroy "
             f"{active_for(st.name)}` first, or --allow-rehearsal")
+    ex = exo_for(st, a)
+    if st["phase"] == "done" and dns_pending(st):
+        return switch_dns(st, ex)
     if st["phase"] not in ("syncing", "receiver-ready", "cutover", "converted"):
         die(f"phase is {st['phase']}")
-    ex = exo_for(st, a)
     steps = st.data.setdefault("cutover_steps", {})
     if st["phase"] != "converted":
         V, vc, vm, proxy = sender_context(a, st, "cutover")
@@ -959,6 +1033,12 @@ def cutover(a):
     port = 3389 if st["plan"]["os_family"] == "windows" else 22
     print(f"cutover {'complete' if up else 'finished, but port %d not reachable yet' % port}: "
           f"{r['name']} {r['ip']} — downtime {st['downtime_s']}s (source shutdown -> port {port} open)")
+    if dns_pending(st):
+        if up:
+            switch_dns(st, ex)
+        else:
+            log(f"DNS not switched (the instance does not answer): `exo-v2v cutover {st.name}` again "
+                "switches it once it does, `rollback` otherwise")
     if not a.in_group:
         alerts.send("cutover-done", f"{st.name}: cut over to {r['name']} ({r['ip']}), downtime {st['downtime_s']}s"
                     + ("" if up else f", port {port} not reachable yet"), migration=st.name)
@@ -966,6 +1046,22 @@ def cutover(a):
         print("note: Windows keeps installing drivers for a few minutes (it may reboot); data disks "
               "come online when that finishes (C:\\Program Files\\Guestfs\\Firstboot\\log.txt)")
     print(f"next: test the workload, then `exo-v2v cleanup {a.name}` (or `rollback`)")
+
+
+def dns_pending(st):
+    return any(not r.get("switched") or r.get("restored") for r in st.data.get("dns") or [])
+
+
+def switch_dns(st, ex):
+    late = public.not_ready(st.data["dns"])
+    if late:
+        log(f"WARNING lowered TTLs not in effect everywhere yet: {', '.join(late)} (some resolvers "
+            "keep the old address until their old TTL runs out)")
+    public.switch(ex, st.data["dns"], lambda _m: public.address(st))
+    st.data.setdefault("cutover_steps", {})["dns_switched"] = time.time()
+    st.save()
+    public.wait_served(ex, st.data["dns"])
+    st.save()
 
 
 def stop_and_scale(st, ex):
@@ -983,6 +1079,7 @@ def stop_and_scale(st, ex):
         ex.instance_scale(r["name"], p["target_type"])
         steps["scaled"] = time.time()
         st.save()
+    public.attach_eip(st, ex)
 
 
 def start_instance(st, ex, boot_timeout, extra_ports=()):
@@ -1008,6 +1105,12 @@ def start_instance(st, ex, boot_timeout, extra_ports=()):
     up = wait_port(r["ip"], port, boot_timeout)
     t_down = steps.get("down_at") or steps.get("source_off") or time.time()
     st.data["downtime_s"] = round((up or time.time()) - t_down)
+    if up and r.get("eip"):
+        # the guest configures the Elastic IP itself (Windows: once its drivers are in)
+        eu = wait_port(r["eip"]["ip"], port, max(300, boot_timeout - round(up - t_down)))
+        r["eip"]["answers"] = bool(eu)
+        log(f"Elastic IP {r['eip']['ip']}: port {port} " + ("open" if eu else "NOT reachable (see the "
+            "guest's /var/log/v2v-netfix.log, systemctl status v2v-eip, or C:\\ProgramData\\exo-v2v\\elastic-ip.log)"))
     steps["started"] = time.time()
     st.set_phase("done")
     return up
@@ -1034,11 +1137,14 @@ def cmd_status(a):
         grp = f"  group={st['group']}" if st.data.get("group") else ""
         if st.data.get("rehearsal_of"):
             grp += f"  rehearsal copy of {st['rehearsal_of']} ({st['rehearsal']})"
-        print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}) in {p['zone']}  phase={st['phase']}{grp}")
+        eip = f", Elastic IP {r['eip']['ip']}" if r.get("eip") else ""
+        print(f"{n}: {p['vm']} -> {r.get('name', '-')} ({r.get('ip', '-')}{eip}) in {p['zone']}  phase={st['phase']}{grp}")
+        for d in st.data.get("dns") or []:
+            print("  " + public.describe(d))
         if last:
             age = int(time.time() - last["t"])
             disks = ", ".join(f"{k}:{v['mode']} {human(v['covered'])}" for k, v in last["disks"].items())
-            print(f"  cycles={len(st['cycles'])} last={age}s ago ({disks})")
+            print(f"  cycles={len(st['cycles'])} last={age}s ago ({disks}{util.transfer(last)})")
         if "downtime_s" in st.data:
             print(f"  downtime {st['downtime_s']}s")
         if r.get("down"):
@@ -1063,6 +1169,9 @@ def rollback(st, a, V, vc, wait_tools=0):
         if ex.instance(r["name"]).get("state") != "stopped":
             ex.instance_stop(r["name"])
         log(f"{st.name}: instance {r['name']} stopped (delete it with cleanup --delete-instance)")
+    if st.data.get("dns"):
+        public.restore(ex, st.data["dns"])
+        st.save()
     vm = vc.vm_of(st["plan"])
     waited = V.power_on(vm, wait_tools) if wait_tools else None
     if not wait_tools and str(vm.runtime.powerState) != "poweredOn":
@@ -1095,6 +1204,10 @@ def cleanup(st, a):
     service.stop_for(migration=st.name)
     ex = exo_for(st, a)
     r = st["receiver"]
+    if st.data.get("dns"):
+        public.finalize(ex, st.data["dns"])
+        st.save()
+    public.release_eip(st, ex, delete=getattr(a, "delete_elastic_ips", False))
     if a.delete_instance and r.get("name") and ex.instance_exists(r["name"]):
         if st["phase"] == "done" and not a.force:
             die("migration is done: refusing to delete the migrated instance without --force")
@@ -1152,6 +1265,13 @@ def main(argv=None):
     s.add_argument("--receiver-template", help="exo-v2v receiver template to create the instance from "
                    "(default: a stock Linux template, rebuilt into RAM at `create`)")
     s.add_argument("--receiver-template-visibility", choices=["public", "private"], default="public")
+    s.add_argument("--elastic-ip", metavar="new|ADDRESS",
+                   help="an Elastic IP for the instance: reserved at create, attached and configured "
+                        "in the guest at cutover")
+    s.add_argument("--reverse-dns", metavar="NAME", help="PTR record of the Elastic IP (or the instance IP)")
+    s.add_argument("--dns-record", action="append", metavar="FQDN",
+                   help="A record on Exoscale DNS pointed at the instance at cutover (TTL lowered at create)")
+    s.add_argument("--dns-ttl", type=int, default=60, help="TTL of --dns-record until cleanup (default 60)")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_plan)
 
     s = sub.add_parser("create"); s.add_argument("name"); s.add_argument("--instance-name")
@@ -1167,10 +1287,15 @@ def main(argv=None):
                        help="receiver readiness timeout when it must be reset (a grown system disk)")
         s.set_defaults(fn=fn)
         s.add_argument("--in-group", action="store_true", help=argparse.SUPPRESS)
+        s.add_argument("--bwlimit", metavar="RATE|off",
+                       help="WAN limit for the whole appliance while this runs (e.g. 100Mbit), "
+                            "instead of config.yaml's wan:")
         if nm == "sync":
             s.add_argument("--full", action="store_true")
             s.add_argument("--every", type=int, help="repeat every N seconds (Ctrl-C stops after the cycle)")
             s.add_argument("--cycles", type=int)
+            s.add_argument("--snapshot", help=argparse.SUPPRESS)           # a group's consistent point
+            s.add_argument("--lock-fd", type=int, help=argparse.SUPPRESS)  # the lock the group holds
         else:
             s.add_argument("--verify", action="store_true", help="hash-compare source and receiver (adds downtime)")
             s.add_argument("--boot-timeout", type=int, default=900)
@@ -1190,6 +1315,8 @@ def main(argv=None):
     s.add_argument("--delete-rollback-volumes", action="store_true")
     s.add_argument("--delete-instance", action="store_true", help="delete the receiver/instance and its volumes")
     s.add_argument("--rename", metavar="NEW", help="rename the migrated instance (hand-over)")
+    s.add_argument("--delete-elastic-ips", action="store_true",
+                   help="release the Elastic IP exo-v2v reserved (kept by default: it is the production address)")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_cleanup)
     s = sub.add_parser("list"); s.set_defaults(fn=lambda a: [print(n) for n in State.all()])
     from . import group, rehearsal, web
@@ -1198,11 +1325,15 @@ def main(argv=None):
     web.add_parser(sub)
     service.add_parser(sub)
     alerts.add_parser(sub)
+    wan.add_parser(sub)
+    from . import jobs, mcp
+    jobs.add_parser(sub)
+    mcp.add_parser(sub)
 
     a = ap.parse_args(argv)
     try:
         a.fn(a)
-    except (ExoError, FileNotFoundError, FileExistsError) as e:
+    except (ExoError, FileNotFoundError, FileExistsError, BadName) as e:
         die(str(e))
 
 

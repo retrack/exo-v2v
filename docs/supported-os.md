@@ -1,6 +1,6 @@
 # Supported operating systems
 
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 exo-v2v converts guests with
 [`virt-v2v-in-place`](https://libguestfs.org/virt-v2v-in-place.1.html), so it

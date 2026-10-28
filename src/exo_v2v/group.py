@@ -33,11 +33,13 @@ import urllib.request
 from . import plan as planmod
 from .exo import Exo, ExoError
 from .state import State, home
-from .util import die, human, log, log_prefix, write_json_atomic
+from .util import die, human, log, log_prefix, transfer, write_json_atomic
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 VM_KEYS = {"vm", "tier", "security_groups", "health", "ip", "name", "instance_type", "system_disk",
-           "receiver_template", "receiver_template_visibility", "fold", "no_fold"}
+           "receiver_template", "receiver_template_visibility", "fold", "no_fold", "public"}
+TOP_KEYS = {"name", "zone", "vms", "networks", "defaults", "anti_affinity", "security_groups", "hooks",
+            "rehearsal", "cutover", "sync", "dns"}
 REHEARSAL_KEYS = {"access", "ssh_keys", "front_cidr", "hosts", "ttl"}
 DEFAULTS = {"cutover": {"parallel": 8, "max_window": None, "rollback_on_failure": False, "verify": False,
                         "health_timeout": "10m", "boot_timeout": "15m", "max_sync_age": "6h"},
@@ -91,6 +93,8 @@ def validate(m, where="manifest"):
             bad(f"`{k}` is required")
     if not NAME_RE.match(m["name"]) or m["name"] == "groups":
         bad(f"name {m['name']!r}: lower-case letters, digits and dashes")
+    if set(m) - TOP_KEYS:
+        bad(f"unknown keys {sorted(set(m) - TOP_KEYS)} (known: {', '.join(sorted(TOP_KEYS))})")
     nets = m.setdefault("networks", {}) or {}
     m["networks"] = nets
     for name, n in nets.items():
@@ -103,6 +107,14 @@ def validate(m, where="manifest"):
                 bad(f"network {name}: `cidr` (e.g. 10.20.0.0/24) is required for a private network")
             n.setdefault("keep_addresses", True)
             n.setdefault("exoscale_name", f"v2v-{m['name']}-{slug(name)}")
+            if n.get("renumber"):
+                try:
+                    old = ipaddress.ip_network(n["cidr"], strict=False)
+                    new = ipaddress.ip_network(n["renumber"], strict=False)
+                except ValueError as e:
+                    bad(f"network {name}: renumber: {e}")
+                if new.prefixlen != old.prefixlen:
+                    bad(f"network {name}: renumber {new} needs the prefix length of {old} (host parts are kept)")
     if len({n["source"] for n in nets.values()}) != len(nets):
         bad("two networks have the same `source` port group")
     if not isinstance(m["vms"], list):
@@ -135,6 +147,14 @@ def validate(m, where="manifest"):
         for net in (v.get("ip") or {}):
             if net not in nets:
                 bad(f"vm {v['vm']}: ip for unknown network {net}")
+        pub = v.get("public") or {}
+        if set(pub) - {"elastic_ip", "reverse_dns"}:
+            bad(f"vm {v['vm']}: public takes elastic_ip (new or an address) and reverse_dns")
+        if pub.get("elastic_ip") not in (None, "new"):
+            try:
+                ipaddress.IPv4Address(pub["elastic_ip"])
+            except ValueError:
+                bad(f"vm {v['vm']}: public.elastic_ip is `new` or an Elastic IP address")
     aag = m.setdefault("anti_affinity", {}) or {}
     m["anti_affinity"] = aag
     for name, vms in aag.items():
@@ -145,6 +165,19 @@ def validate(m, where="manifest"):
     for name, rules in sgs.items():
         for r in rules or []:
             parse_rule(r, bad)
+    dns = m.get("dns") or {}
+    if dns:
+        if set(dns) - {"ttl", "records"} or not isinstance(dns.get("records"), dict):
+            bad("dns: {ttl: 60, records: {www.example.com: VM, ...}}")
+        short = {x.rsplit("/", 1)[-1] for x in seen} | seen
+        for fqdn, vm in dns["records"].items():
+            if vm not in short:
+                bad(f"dns: {fqdn} points at {vm}, which is not a VM of the group")
+        try:
+            dns["ttl"] = duration(dns.get("ttl", 60))
+        except ValueError as e:
+            bad(f"dns.ttl: {e}")
+    m["dns"] = dns
     m["hooks"] = m.get("hooks") or {}
     m["rehearsal"] = m.get("rehearsal") or {}
     if set(m["rehearsal"]) - REHEARSAL_KEYS:
@@ -168,17 +201,22 @@ def validate(m, where="manifest"):
 
 
 def parse_rule(r, bad=die):
-    """'tcp/80 0.0.0.0/0' | 'udp/53 10.0.0.0/8' | 'icmp 0.0.0.0/0' -> (proto, port, cidr)."""
+    """'tcp/80 0.0.0.0/0' | 'udp/53 10.0.0.0/8' | 'icmp 0.0.0.0/0' | 'tcp/5432 sg:app'
+    -> (proto, port, cidr or sg:NAME)."""
     parts = str(r).split()
     if len(parts) != 2:
         bad(f"security group rule {r!r}: 'tcp/PORT CIDR' (or udp/PORT, icmp)")
     proto, _, port = parts[0].partition("/")
     if proto not in ("tcp", "udp", "icmp") or (proto != "icmp" and not re.fullmatch(r"\d+(-\d+)?", port)):
         bad(f"security group rule {r!r}: 'tcp/PORT CIDR' (or udp/PORT, icmp)")
+    if parts[1].startswith("sg:"):
+        if not re.fullmatch(r"sg:[A-Za-z0-9_.-]+", parts[1]):
+            bad(f"security group rule {r!r}: sg:NAME")
+        return proto, port, parts[1]
     try:
         ipaddress.ip_network(parts[1], strict=False)
     except ValueError:
-        bad(f"security group rule {r!r}: bad CIDR")
+        bad(f"security group rule {r!r}: bad CIDR (or sg:NAME)")
     return proto, port, parts[1]
 
 
@@ -284,7 +322,7 @@ class Child:
     prefix."""
     out_lock = threading.Lock()
 
-    def __init__(self, g, a, member, args):
+    def __init__(self, g, a, member, args, fds=()):
         self.member, self.args = member, args
         path = os.path.join(g.dir, "logs", f"{member['vm']}.log")
         logf = open(path, "a")
@@ -292,7 +330,7 @@ class Child:
         logf.flush()
         start = logf.tell()
         self.proc = subprocess.Popen(base_cmd(a) + args, stdout=logf, stderr=subprocess.STDOUT,
-                                     stdin=subprocess.DEVNULL, start_new_session=True)
+                                     stdin=subprocess.DEVNULL, start_new_session=True, pass_fds=tuple(fds))
         logf.close()
         self.tail = []
         self.thread = threading.Thread(target=self._follow, args=(path, start), daemon=True)
@@ -341,14 +379,16 @@ class Child:
         return (bad or self.tail or ["(no output)"])[-1]
 
 
-def run_members(g, a, members, argsfn, parallel):
-    """Run one command per member with at most `parallel` at a time.
-    Returns {vm: (rc, last error line)}; a failure does not stop the others."""
+def run_members(g, a, members, argsfn, parallel, fds=None):
+    """Run one command per member with at most `parallel` at a time; fds:
+    {migration: fd} handed to that member's process. Returns {vm: (rc, last
+    error line)}; a failure does not stop the others."""
     res, running, todo = {}, [], list(members)
     while todo or running:
         while todo and len(running) < max(1, parallel):
             x = todo.pop(0)
-            running.append(Child(g, a, x, argsfn(x)))
+            fd = (fds or {}).get(x["migration"])
+            running.append(Child(g, a, x, argsfn(x), fds=() if fd is None else (fd,)))
         time.sleep(1)
         for c in list(running):
             if c.poll() is not None:
@@ -520,6 +560,9 @@ def cmd_plan(a):
         p["inventory"] = invs[v["vm"]]
         p["group"], p["tier"], p["final_name"] = m["name"], v["tier"], v.get("name")
         p["health"] = v.get("health") or {}
+        from .cli import public_of
+        pub = v.get("public") or {}
+        p["public"] = public_of(pub.get("elastic_ip"), pub.get("reverse_dns"), [], 60, p["errors"])
         plans[v["vm"]] = p
         errors += [f"{v['vm']}: {e}" for e in p["errors"]]
     errors += group_checks(m, plans, ex)
@@ -530,6 +573,18 @@ def cmd_plan(a):
             print(f"  NIC {n['source_mac'] or '(new)':<17} -> {n['network']}"
                   + (f" {n['ip']}/{n['prefix']} ({n['mode']})" if n.get("ip") else " (DHCP)"))
     print_runbook(m, plans)
+    for sg, rules in m["security_groups"].items():
+        if ex.exists("sg", sg):
+            have = existing_rules(ex, sg)
+            missing = [r for r in rules or [] if rule_key(*parse_rule(r)) not in have]
+            extra = len(set(have) - {rule_key(*parse_rule(r)) for r in rules or []})
+            if missing or extra:
+                print(f"security group {sg} exists: " + ", ".join(
+                    ([f"to add {', '.join(missing)}"] if missing else []) +
+                    ([f"{extra} rule(s) not in the manifest"] if extra else []))
+                    + " (`group create --update-rules` adds the missing ones)")
+    for fqdn, vm in (m.get("dns") or {}).get("records", {}).items():
+        print(f"DNS {fqdn}: A record -> {vm} once the last tier is healthy (TTL {m['dns']['ttl']}s from create on)")
     for e in errors:
         print(f"ERROR: {e}")
     if errors and not a.force:
@@ -566,11 +621,23 @@ def group_checks(m, plans, ex):
     for name, vms in m["anti_affinity"].items():
         if len(vms) > 8:
             errors.append(f"anti_affinity {name}: at most 8 instances per anti-affinity group")
+    if m.get("dns"):
+        from . import public
+        errors += public.check(ex, list(m["dns"]["records"]))
+    for sg, rules in m["security_groups"].items():
+        for r in rules or []:
+            src = parse_rule(r)[2]
+            if src.startswith("sg:") and src[3:] not in m["security_groups"] and not ex.exists("sg", src[3:]):
+                errors.append(f"security group {sg}: rule {r!r}: security group {src[3:]} does not exist")
     try:
         lim = {x["resource"]: x for x in ex.run("limits")}
         inst = lim.get("Compute instances", {})
         if inst and inst["used"] + len(plans) > inst["max"]:
             errors.append(f"instance quota: {inst['used']} used + {len(plans)} receivers > {inst['max']}")
+        eip = lim.get("Elastic IP addresses", {})
+        new_eips = sum(1 for p in plans.values() if (p.get("public") or {}).get("elastic_ip") == "new")
+        if eip and new_eips and eip["used"] + new_eips > eip["max"]:
+            errors.append(f"Elastic IP quota: {eip['used']} used + {new_eips} > {eip['max']}")
         pn = lim.get("Private networks", {})
         new = sum(1 for n in m["networks"].values() if n["type"] == "private" and not ex.exists("privnet", n["exoscale_name"]))
         if pn and pn["used"] + new > pn["max"]:
@@ -617,7 +684,7 @@ def cmd_create(a):
         if ex.exists("privnet", pn):
             log(f"private network {pn} exists")
         else:
-            start, end, mask = planmod.privnet_range(n["cidr"])
+            start, end, mask = planmod.privnet_range(n.get("renumber") or n["cidr"])
             ex.privnet_create(pn, start, end, mask, f"exo-v2v group {m['name']} ({name})")
             res.setdefault("privnets", []).append(pn)
             g.event(f"private network {pn} created ({n['cidr']}, managed {start}-{end})")
@@ -630,14 +697,11 @@ def cmd_create(a):
     for sg, rules in m["security_groups"].items():
         if not ex.exists("sg", sg):
             ex.sg_create(sg)
-            for r in rules or []:
-                proto, port, cidr = parse_rule(r)
-                args = ["compute", "security-group", "rule", "add", sg, "--network", cidr, "--protocol", proto,
-                        "--description", f"exo-v2v group {m['name']}"]
-                args += ["--icmp-type", "8", "--icmp-code", "0"] if proto == "icmp" else ["--port", port]
-                ex.run(*args, json_out=False)
             res.setdefault("sgs", []).append(sg)
-            g.event(f"security group {sg} created ({', '.join(rules or []) or 'no rules'})")
+            g.event(f"security group {sg} created")
+    for sg, rules in m["security_groups"].items():     # sg: sources may name one created above
+        if sg in res.get("sgs", []) or a.update_rules:
+            sync_rules(ex, sg, rules or [], m["name"], prune=sg in res.get("sgs", []))
     g.save()
     from .cli import sender_cidr
     cidr = sender_cidr(a)
@@ -653,20 +717,95 @@ def cmd_create(a):
     if bad:
         die(f"{len(bad)} receiver(s) failed: {', '.join(bad)} (fix, then `exo-v2v group create {a.name}` again: "
             "ready members are skipped; a failed one may need `exo-v2v cleanup MEMBER --delete-instance` first)")
+    if m.get("dns") and not g.data.get("dns"):
+        from . import public
+        g.data["dns"] = public.prepare(ex, [(f, member_of(g, vm)) for f, vm in m["dns"]["records"].items()],
+                                       m["dns"]["ttl"])
+        g.save()
+        g.event("DNS records saved, TTLs lowered: " + ", ".join(d["fqdn"] for d in g.data["dns"]))
     print(f"group {a.name}: {len(g.members())} receivers ready; next `exo-v2v group sync {a.name}`")
+
+
+def member_of(g, vm):
+    """The migration of a member named by its VM name or path (the last part counts)."""
+    for x in g.members():
+        if vm in (x["vm"], x["vm"].rsplit("/", 1)[-1]):
+            return x["migration"]
+    raise KeyError(vm)
+
+
+def rule_key(proto, port, src):
+    return (proto, "" if proto == "icmp" else str(port), src)
+
+
+def existing_rules(ex, sg):
+    """{(proto, port, source): rule id} of a security group's ingress rules."""
+    out = {}
+    for r in ex.sg(sg).get("ingress_rules") or []:
+        src = r.get("network") or (f"sg:{r['security_group']}" if r.get("security_group") else "")
+        port = (f"{r['start_port']}" if r.get("start_port") == r.get("end_port")
+                else f"{r.get('start_port')}-{r.get('end_port')}") if r.get("start_port") else ""
+        out[rule_key(r.get("protocol"), port, src)] = r.get("id")
+    return out
+
+
+def sync_rules(ex, sg, rules, group, prune=False):
+    """Adds the manifest's missing rules; with prune (a group exo-v2v created),
+    removes the rules the manifest does not list. Returns (added, removed)."""
+    want = {rule_key(*parse_rule(r)): r for r in rules}
+    have = existing_rules(ex, sg)
+    added, removed = [], []
+    for k, r in want.items():
+        if k in have:
+            continue
+        proto, port, src = k
+        args = ["compute", "security-group", "rule", "add", sg, "--protocol", proto,
+                "--description", f"exo-v2v group {group}"]
+        args += ["--security-group", src[3:]] if src.startswith("sg:") else ["--network", src]
+        args += ["--icmp-type", "8", "--icmp-code", "0"] if proto == "icmp" else ["--port", port]
+        ex.run(*args, json_out=False)
+        added.append(r)
+    if prune:
+        for k, rid in have.items():
+            if k not in want:
+                ex.sg_rule_delete(sg, rid)
+                removed.append(f"{k[0]}/{k[1]} {k[2]}".replace("/ ", " "))
+    if added or removed:
+        log(f"security group {sg}: " + ", ".join([f"+{r}" for r in added] + [f"-{r}" for r in removed]))
+    return added, removed
+
+
+def claim_bwlimit(a):
+    """--bwlimit: the group process holds the override; its children's pacers follow it."""
+    if getattr(a, "bwlimit", None):
+        from . import wan
+        try:
+            log(f"WAN limit while the group runs (whole appliance): {wan.human_rate(wan.claim_override(a.bwlimit))}")
+        except wan.WanError as e:
+            die(str(e))
 
 
 def cmd_sync(a):
     g = Group.load(a.name)
     g.lock("sync")
+    claim_bwlimit(a)
     n = 0
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True) or log("stopping after this round"))
     while True:
         t0 = time.time()
         args = ["--full"] if a.full and n == 0 else []
-        res = run_members(g, a, g.members(), lambda x: ["sync", x["migration"], "--in-group", *args],
-                          a.parallel or g.m["sync"]["parallel"])
+        if a.consistent:
+            try:
+                rec, _ = consistent_cycle(g, a, g.members(), a.quiesce is not None, a.quiesce == "strict",
+                                          duration(a.max_spread))
+                res = {x["vm"]: (0, "") for x in g.members()}
+                g.data["last_consistent"] = rec
+            except GroupFailure as e:
+                res = {"group": (1, str(e))}
+        else:
+            res = run_members(g, a, g.members(), lambda x: ["sync", x["migration"], "--in-group", *args],
+                              a.parallel or g.m["sync"]["parallel"])
         n += 1
         bad = {vm: e for vm, (rc, e) in res.items() if rc}
         g.data["last_sync"] = {"t": time.time(), "seconds": round(time.time() - t0),
@@ -686,6 +825,96 @@ def cmd_sync(a):
         sys.exit(1)
 
 
+# ---------------- consistent point ----------------
+
+CG_PREFIX = "v2v-sync-cg"       # starts with v2v-sync: plan and sweep know it as ours
+
+
+def consistent_cycle(g, a, members, quiesce=False, strict=False, max_spread=None, hold=False):
+    """Every member's replica at one point in time. Their locks are taken (no
+    other cycle advances a replica meanwhile), a catch-up cycle runs, one snapshot
+    per member is issued back to back (quiesced on request), and each member is
+    copied from its snapshot by its own process, which shares the lock (--lock-fd).
+    Returns (record, {migration: lock file}): with hold=True the locks stay taken
+    (rehearsal seeding), else they are released."""
+    from .cli import vsphere_connect
+    from .rehearsal import wait_lock
+    sts = {x["migration"]: State.load(x["migration"]) for x in members}
+    vm_of = {x["migration"]: x["vm"] for x in members}
+    locks, name, ok = {}, None, False
+    try:
+        for mig in sorted(sts):
+            locks[mig] = wait_lock(sts[mig], f"consistent point of group {g.name}")
+        fds = {mig: lk.fileno() for mig, lk in locks.items()}
+        V, vc = vsphere_connect(a)
+        try:
+            proxy = V.self_vm(vc) if os.geteuid() == 0 else None
+            for mig, st in sts.items():
+                vm = vc.vm_of(st["plan"])
+                for msg in V.sweep(vc, vm, proxy):
+                    log(f"{vm_of[mig]}: cleanup: {msg}")
+                if not vm.config.changeTrackingEnabled or not all(V.disk_ctk(vm).values()):
+                    log(f"{vm_of[mig]}: enabling CBT")      # before the snapshot, or it copies whole disks
+                    V.enable_cbt(vc, vm)
+        finally:
+            vc.close()
+        res = run_members(g, a, members, lambda x: ["sync", x["migration"], "--in-group",
+                                                     "--lock-fd", str(fds[x["migration"]])],
+                          g.m["sync"]["parallel"], fds=fds)
+        bad = {vm: e for vm, (rc, e) in res.items() if rc}
+        if bad:
+            raise GroupFailure(f"catch-up cycle failed on {', '.join(f'{k} ({v})' for k, v in bad.items())}")
+        name = f"{CG_PREFIX}-{g.name}-{int(time.time())}"
+        V, vc = vsphere_connect(a)
+        try:
+            vms = {mig: vc.vm_of(st["plan"]) for mig, st in sts.items()}
+            by_vm = {vms[m].name: vm_of[m] for m in vms}          # read while the session lives
+            try:
+                snaps, spread = V.snapshot_many(list(vms.values()), name, quiesce, strict)
+            except RuntimeError as e:
+                raise GroupFailure(str(e)) from None
+        finally:
+            vc.close()
+        record = {"snapshot": name, "t": time.time(), "spread_s": spread,
+                  "quiesce": "strict" if strict else bool(quiesce),
+                  "members": {by_vm[k]: {"quiesced": v["quiesced"], "reason": v["reason"],
+                                         # seconds after the first request: when its snapshot began, ended
+                                         "start_s": round(v["start"] - min(x["start"] for x in snaps.values()), 1),
+                                         "end_s": round(v["end"] - min(x["start"] for x in snaps.values()), 1)}
+                              for k, v in snaps.items()}}
+        q = [v["quiesced"] for v in snaps.values()]
+        record["mode"] = "quiesced" if all(q) else "crash-consistent" if not any(q) else "mixed"
+        log(f"consistent point {name}: {len(snaps)} snapshots within {spread}s ({record['mode']})")
+        if max_spread and spread > max_spread:
+            raise GroupFailure(f"the snapshots spread over {spread}s (more than --max-spread {max_spread}s)")
+        if len(members) > 14:
+            log(f"WARNING {len(members)} members copied at once: more hot-added disks than one controller "
+                "takes; the appliance needs more paravirtual SCSI controllers")
+        res = run_members(g, a, members, lambda x: ["sync", x["migration"], "--in-group", "--snapshot", name,
+                                                     "--lock-fd", str(fds[x["migration"]])],
+                          len(members), fds=fds)
+        bad = {vm: e for vm, (rc, e) in res.items() if rc}
+        if bad:
+            raise GroupFailure(f"copy from the consistent point failed on "
+                               f"{', '.join(f'{k} ({v})' for k, v in bad.items())}")
+        ok = True
+        return record, locks
+    finally:
+        if name and not ok:
+            try:
+                V, vc = vsphere_connect(a)
+                try:
+                    for st in sts.values():
+                        V.remove_named(vc.vm_of(st["plan"]), name)
+                finally:
+                    vc.close()
+            except Exception as e:                      # the next cycle's sweep removes them
+                log(f"snapshots {name} left for the next sweep: {e}")
+        if not (ok and hold):
+            for lk in locks.values():
+                lk.close()
+
+
 # ---------------- coordinated cutover ----------------
 
 def ctx_of(g):
@@ -696,6 +925,8 @@ def ctx_of(g):
         r, p = st["receiver"], st["plan"]
         privs = {n["name"]: n["ip"] for n in p.get("networks", []) if n.get("ip")}
         d = {"public_ip": r.get("ip", ""), "private_ip": next(iter(privs.values()), ""),
+             "elastic_ip": (r.get("eip") or {}).get("ip", ""),
+             "address": (r.get("eip") or {}).get("ip") or r.get("ip", ""),
              "name": r.get("name", ""), "vm": x["vm"], **{f"ip.{k}": v for k, v in privs.items()}}
         out[x["vm"]] = d
         out.setdefault(x["vm"].rsplit("/", 1)[-1], d)     # {web01.public_ip} for DC/vm/shop/web01
@@ -826,6 +1057,7 @@ def human_age(t):
 def cmd_cutover(a):
     from .cli import exo_for, start_instance, stop_and_scale
     g = Group.load(a.name)
+    claim_bwlimit(a)
     from .rehearsal import active_for
     busy = sorted({active_for(x["migration"]) for x in g.members()} - {None})
     if busy and not a.allow_rehearsal:
@@ -974,6 +1206,9 @@ def cmd_cutover(a):
                     start_instance(st, exo_for(st, a), c["boot_timeout"], extra_ports=health_ports(h))
                 ok, detail = health_check(h, ctx, x["vm"], h.get("timeout") and duration(h["timeout"])
                                           or c["health_timeout"]) if h else (True, "no health check")
+                eip = st["receiver"].get("eip")
+                if ok and eip and eip.get("answers") is False:
+                    ok, detail = False, f"Elastic IP {eip['ip']} does not answer (guest configuration)"
                 cut["members"].setdefault(x["vm"], {}).update(health=detail, healthy=ok,
                                                               downtime_s=st.data.get("downtime_s"))
                 return x["vm"], ok, detail
@@ -987,13 +1222,26 @@ def cmd_cutover(a):
                 raise GroupFailure(f"tier {tier}: health check failed on {', '.join(bad)}")
             mark(f"tier{tier}_up")
             g.event(f"tier {tier} up and healthy")
+        if g.data.get("dns") and "dns_switch" not in steps:
+            from . import public
+            late = public.not_ready(g.data["dns"])
+            if late:
+                g.event(f"WARNING lowered TTLs not in effect everywhere yet: {', '.join(late)}")
+            ex = exo_for(sts[g.members()[0]["vm"]], a)
+            public.switch(ex, g.data["dns"], lambda mig: public.address(State.load(mig)))
+            g.save()
+            public.wait_served(ex, g.data["dns"])
+            mark("dns_switch")
+            g.event("DNS switched: " + ", ".join(f"{d['fqdn']} -> {d['new']}" + (
+                f" (served after {d['served_s']}s)" if d.get("served_s") else "") for d in g.data["dns"]))
         if "post_hook" not in steps:
             try:
                 run_hook(g, "post_cutover", ctx)
             except GroupFailure as e:
                 g.event(f"WARNING {e} (the application runs on Exoscale)")
             mark("post_hook")
-        cut.update(state="done", ended=time.time(), window_s=round(time.time() - steps["stop_started"]))
+        up_at = steps.get(f"tier{g.tiers()[-1]}_up") or time.time()
+        cut.update(state="done", ended=time.time(), window_s=round(up_at - steps["stop_started"]))
         g.save()
         g.event(f"cutover done: window {cut['window_s']}s (first stop -> last tier healthy)")
         from . import alerts
@@ -1032,6 +1280,10 @@ def do_rollback(g, a):
         if busy:
             die(f"{x['vm']}: a {busy['what']} is still running (pid {busy['pid']}); wait for it or stop it first")
     sts = {x["vm"]: State.load(x["migration"]) for x in g.members()}
+    if g.data.get("dns"):
+        from . import public
+        public.restore(exo_for(sts[g.members()[0]["vm"]], a), g.data["dns"])
+        g.save()
     # front first: no traffic reaches a half-stopped back end on Exoscale
     for tier in reversed(g.tiers()):
         for x in g.of_tier(tier):
@@ -1078,11 +1330,16 @@ def cmd_cleanup(a):
         if st["phase"] == "cleaned":
             continue
         ns = argparse.Namespace(account=a.account, delete_instance=a.delete_instances, force=a.force,
-                                delete_rollback_volumes=a.delete_rollback_volumes, rename=None)
+                                delete_rollback_volumes=a.delete_rollback_volumes, rename=None,
+                                delete_elastic_ips=a.delete_elastic_ips)
         if st["phase"] == "done" and a.delete_instances and not a.force:
             die(f"{x['vm']} is migrated: refusing to delete its instance without --force")
         cleanup(st, ns)
     ex = Exo(g.m["zone"], a.account)
+    if g.data.get("dns"):
+        from . import public
+        public.finalize(ex, g.data["dns"])
+        g.save()
     res = g.data.get("resources", {})
     if a.delete_instances:      # abandoning the move: what the group created goes too
         for kind, fn in (("aags", ex.aag_delete), ("privnets", ex.privnet_delete), ("sgs", ex.sg_delete)):
@@ -1112,7 +1369,7 @@ def member_row(x):
     busy = member_busy(x["migration"])
     return {"vm": x["vm"], "tier": x["tier"], "phase": st["phase"], "busy": busy["what"] if busy else "",
             "last": f"{human_age(last['t'])} ago, {human(sum(d['covered'] for d in last['disks'].values()))} "
-                    f"in {last['seconds']}s" if last else "-",
+                    f"in {last['seconds']}s{transfer(last)}" if last else "-",
             "public": r.get("ip", "-"), "private": priv or "-",
             "downtime": f"{st['downtime_s']}s" if "downtime_s" in st.data else ""}
 
@@ -1125,6 +1382,9 @@ def print_status(g):
              if cut else ""))
     if cut.get("error"):
         print(f"  error: {cut['error']}")
+    from .public import describe
+    for d in g.data.get("dns") or []:
+        print(f"  {describe(d)} (-> {d['migration']})")
     print(f"  {'tier':<4} {'vm':<14} {'phase':<14} {'running':<8} {'last cycle':<30} {'public IP':<16} "
           f"{'private':<14} downtime")
     for tier in g.tiers():
@@ -1154,7 +1414,20 @@ def cmd_rehearse(a):
                for x in g.members() if not a.vm or x["vm"] in a.vm]
     if not members:
         die(f"no member of {a.name} matches {a.vm}")
-    R.rehearse(g.name, members, R.settings_of(g.m.get("rehearsal"), a), g.m["zone"], a)
+    def point():
+        return consistent_cycle(g, a, [x for x in g.members() if x["migration"] in {m["migration"] for m in members}],
+                                a.quiesce is not None, a.quiesce == "strict", duration(a.max_spread), hold=True)
+    R.rehearse(g.name, members, R.settings_of(g.m.get("rehearsal"), a), g.m["zone"], a,
+               consistent=point if a.consistent else None)
+
+
+def consistent_options(s):
+    s.add_argument("--consistent", action="store_true",
+                   help="every member at one point in time (snapshots issued together)")
+    s.add_argument("--quiesce", nargs="?", const="yes", choices=["yes", "strict"],
+                   help="quiesce through VMware Tools (VSS/fsfreeze); strict: fail instead of "
+                        "falling back to crash-consistent")
+    s.add_argument("--max-spread", metavar="DURATION", help="fail if the snapshots spread over more (e.g. 30s)")
 
 
 # ---------------- argparse ----------------
@@ -1175,20 +1448,29 @@ def add_parser(sub):
     s = gs.add_parser("create", help="networks, anti-affinity groups, then the receivers")
     s.add_argument("name"); s.add_argument("--sender-cidr")
     s.add_argument("--parallel", type=int, default=4); s.add_argument("--timeout", type=int, default=1800)
+    s.add_argument("--update-rules", action="store_true",
+                   help="add the manifest's missing rules to existing security groups too")
     s.set_defaults(fn=cmd_create)
     s = gs.add_parser("sync", help="a cycle on every member (parallel)")
     s.add_argument("name"); s.add_argument("--every", type=int); s.add_argument("--cycles", type=int)
     s.add_argument("--parallel", type=int); s.add_argument("--full", action="store_true")
+    s.add_argument("--bwlimit", metavar="RATE|off", help="WAN limit for the whole appliance while this runs")
+    consistent_options(s)
     s.set_defaults(fn=cmd_sync)
     s = gs.add_parser("rehearse", help="start airgapped copies of the members, reachable through a relay")
     s.add_argument("name"); s.add_argument("--vm", action="append", help="only these members (repeatable)")
     from .rehearsal import add_options
     add_options(s)
+    consistent_options(s)
+    s.add_argument("--accept-inconsistent", action="store_true",
+                   help="resume seeding although members moved past the consistent point (the report says so)")
     s.set_defaults(fn=cmd_rehearse)
     s = gs.add_parser("cutover", help="the coordinated cutover (resumable)")
     s.add_argument("--allow-rehearsal", action="store_true", help="cut over although a rehearsal is up")
     s.add_argument("name"); s.add_argument("--verify", action="store_true")
-    s.add_argument("--no-warm-cycle", action="store_true"); s.set_defaults(fn=cmd_cutover)
+    s.add_argument("--no-warm-cycle", action="store_true")
+    s.add_argument("--bwlimit", metavar="RATE|off", help="WAN limit for the whole appliance while this runs")
+    s.set_defaults(fn=cmd_cutover)
     s = gs.add_parser("status"); s.add_argument("name", nargs="?"); s.set_defaults(fn=cmd_status)
     s = gs.add_parser("rollback", help="sources back on VMware, back end first")
     s.add_argument("name"); s.add_argument("--tools-timeout", type=int, default=600)
@@ -1196,4 +1478,6 @@ def add_parser(sub):
     s = gs.add_parser("cleanup", help="member cleanups (rename to final names); --delete-instances abandons")
     s.add_argument("name"); s.add_argument("--delete-instances", action="store_true")
     s.add_argument("--delete-rollback-volumes", action="store_true"); s.add_argument("--force", action="store_true")
+    s.add_argument("--delete-elastic-ips", action="store_true",
+                   help="release the Elastic IPs exo-v2v reserved (kept by default)")
     s.set_defaults(fn=cmd_cleanup)

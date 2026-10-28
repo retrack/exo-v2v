@@ -1,13 +1,68 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-10-28
 
+What commercial replication products do around a move, kept to migration: the
+public side of the cutover, WAN controls, consistent rehearsals, and an API.
+
+- **Public side of the cutover** ([Public IPs and DNS](docs/public.md)):
+  - Elastic IPs: `plan --elastic-ip new|ADDRESS` or `vms[].public.elastic_ip`;
+    reserved at `create` (the address is known before the window), attached to
+    the stopped instance at cutover, configured in the guest (Linux:
+    `v2v-eip.service` puts it on lo; Windows: the public NIC made static from
+    its DHCP lease, plus the Elastic IP, DHCP restored on failure), checked on
+    its own address; kept by `cleanup` unless `--delete-elastic-ips`.
+  - Reverse DNS (`--reverse-dns`, `public.reverse_dns`) on the Elastic IP or
+    the instance.
+  - DNS records on Exoscale DNS (`--dns-record`, manifest `dns:`): value saved
+    and TTL lowered at `create`, switched once the instance (group: the last
+    tier) is healthy, restored by `rollback`, TTL restored by `cleanup`. After
+    the switch the zone's nameservers are asked until every address of theirs
+    serves the new value (Exoscale's: 1 to 62 s in our tests).
+  - Renumbering: `networks.NAME.renumber: CIDR` (host parts kept) or a per-VM
+    `ip:` that differs from the guest's address; the guest's configuration is
+    rewritten in place (ifupdown, netplan, NetworkManager, ifcfg,
+    systemd-networkd, its `/etc/hosts` line). The network fix-up now also reads
+    systemd-networkd files.
+  - Security group rules with `sg:GROUP` sources; `group plan` shows how
+    existing groups differ, `group create --update-rules` adds missing rules.
+  - Unknown top-level manifest keys are refused.
+- **WAN controls** ([runbook](docs/OPERATIONS.md#bandwidth-limit-schedule-compression)):
+  `wan:` in `config.yaml` (limit, weekly schedule, burst, compression); one
+  token bucket for the whole appliance (every sync, group member and timer);
+  the schedule applies within 15 s, also in the middle of a copy;
+  `--bwlimit RATE|off` on `sync`, `cutover`, `group sync`, `group cutover`;
+  `exo-v2v wan status`. zlib compression of the copy stream (`compress: auto`
+  compresses while a limit of 50 MiB/s or less applies), negotiated per
+  connection so older receivers keep working. `status`, `group status` and the
+  web page show the bytes sent and the time waited.
+- **Consistent rehearsals** ([Rehearsal](docs/rehearsal.md#one-point-in-time---consistent)):
+  `group rehearse --consistent [--quiesce[=strict]] [--max-spread]`: every
+  member's replica at one point (locks held, snapshots requested together,
+  VMware Tools quiesce on request) before the copies are seeded; the report
+  shows the point, the spread and the quiesce result. `group sync --consistent`.
+- **Actions, API, MCP** ([Actions, API and MCP](docs/api.md)): with
+  `actions: enabled: true` and a token, the web page and its API start a sync
+  cycle or round, a rehearsal, or destroy a rehearsal (never a cutover or a
+  rollback); each is a job (a transient systemd unit on the appliance) with
+  its log, alerts and `exo-v2v job list|show|log|cancel|start`. `exo-v2v mcp`:
+  a read-only MCP server on stdin/stdout. The web page: sign-in form, answers
+  only loopback names without a token (DNS rebinding), POST `/login`.
+- **Fixes**:
+  - vSphere sessions are kept alive (vCenter and ESXi drop a session idle for
+    30 minutes; a hot-add copy of a large disk made no API call that long, and
+    the detach after it would fail).
+  - Migration names are checked (`groups`, `rehearsals`, `jobs` and the home's
+    files were accepted and collided with its directories).
+  - A group cutover's window ends when the last tier is healthy, as documented
+    (it included the `post_cutover` hook).
 - **Trademarks and licences**: a `NOTICE` file (shipped in the wheel too), a
   [docs page](docs/legal.md), the docs site footer and the README say that the
   VMware product names are trademarks of Broadcom, that exo-v2v is not
   affiliated with Broadcom and contains no VMware software, that users need
   their own VMware licences and stay responsible for the licences of the
   systems they migrate, and that exo-v2v comes without warranty.
+- IAM policy: rules for Elastic IPs, reverse DNS and DNS records (rules 15–18).
 
 ## 0.5.0 — 2026-10-26
 

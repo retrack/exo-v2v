@@ -88,13 +88,18 @@ def network_map(nics, networks, ips=None):
             continue
         e = {"network": n["exoscale_name"], "name": name, "source_mac": nic["mac"], "mode": "dhcp",
              "port_group": nic.get("port_group")}
-        net = ipaddress.ip_network(n["cidr"], strict=False)
+        src = ipaddress.ip_network(n["cidr"], strict=False)
+        net = ipaddress.ip_network(n.get("renumber") or n["cidr"], strict=False)
         if n.get("keep_addresses", True):
+            cand = [a for a in nic.get("ips", []) if ipaddress.ip_address(a["ip"]) in src]
+            old = cand[0]["ip"] if cand else None
             want, origin = ips.get(name), "manifest"
-            if not want:
-                cand = [a for a in nic.get("ips", []) if ipaddress.ip_address(a["ip"]) in net]
-                if cand:
-                    want, origin = cand[0]["ip"], cand[0].get("origin") or "guest"
+            if not want and old:
+                want, origin = old, cand[0].get("origin") or "guest"
+                if net != src:          # renumber: same host part in the new network
+                    want = str(net.network_address + (int(ipaddress.ip_address(old)) - int(src.network_address)))
+            if want and old and old != want:
+                e["from"] = old         # the guest's configuration is rewritten (v2v-netfix)
             if not want:
                 errors.append(f"{where}: address on {name} unknown (VMware Tools not running?): "
                               f"set `ip: {{{name}: A.B.C.D}}` for this VM")

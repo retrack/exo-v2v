@@ -82,12 +82,20 @@ svg.chart rect { fill: var(--teal); } svg.chart rect.final { fill: var(--amber);
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .scroll { overflow-x: auto; }
 .empty { padding: 28px; text-align: center; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 2px; }
+button.act { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+button.act:hover { border-color: var(--link); color: var(--link); }
+button.act.danger:hover { border-color: var(--red); color: var(--red); }
+button.act:disabled { opacity: .5; cursor: default; }
+.actions label { font-size: 12px; color: var(--muted); }
+.signin { max-width: 380px; margin: 40px auto; }
+.signin input { font: inherit; width: 100%; padding: 6px 8px; margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } main { padding: 14px 12px 40px; } header { padding: 10px 12px; } .hide-s { display: none; } }
 </style>
 </head>
 <body>
 <header>
-  <div class="logo"><b>exo</b>-v2v</div><span class="ro">read-only</span>
+  <div class="logo"><b>exo</b>-v2v</div><span class="ro" id="mode">read-only</span>
   <div class="right"><div id="host"></div><div id="stamp"></div></div>
 </header>
 <main id="app"><div class="empty">loading…</div></main>
@@ -95,11 +103,17 @@ svg.chart rect { fill: var(--teal); } svg.chart rect.final { fill: var(--amber);
 "use strict";
 const app = document.getElementById("app");
 const PHASES = ["planned", "receiver-creating", "receiver-ready", "syncing", "cutover", "converted", "done"];
-let timer = null, logState = {group: null, vm: null, follow: true}, showCleaned = false;
+let timer = null, logState = {group: null, vm: null, follow: true}, showCleaned = false, policy = {actions: []};
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const enc = encodeURIComponent;
 function bytes(n) { if (n == null) return "–"; const u = ["B", "KiB", "MiB", "GiB", "TiB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + " " + u[i]; }
+function wire(c) {
+  const d = Object.values(c.disks || {}), sent = d.reduce((a, x) => a + (x.sent || 0), 0);
+  const w = d.reduce((a, x) => a + (x.wire ?? x.sent ?? 0), 0), thr = d.reduce((a, x) => a + (x.throttled_s || 0), 0);
+  const z = d.some(x => String(x.compression || "").startsWith("zlib"));
+  return bytes(w) + (z && sent ? ` (×${(w / sent).toFixed(2)})` : "") + (thr >= 1 ? ` · throttled ${dur(thr)}` : "");
+}
 function dur(s) { if (s == null) return "–"; s = Math.round(s); if (s < 120) return s + " s"; if (s < 7200) return Math.round(s / 60) + " min"; if (s < 172800) return (s / 3600).toFixed(1) + " h"; return Math.round(s / 86400) + " days"; }
 function ago(t) { return t ? dur(Date.now() / 1000 - t) + " ago" : "–"; }
 function clock(t) { return t ? new Date(t * 1000).toLocaleString() : "–"; }
@@ -108,8 +122,71 @@ const busy = b => b ? `<span class="busy" title="pid ${esc(b.pid)} since ${esc(c
 
 async function api(path) {
   const r = await fetch(path, {cache: "no-store", credentials: "same-origin"});
+  if (r.status === 401) throw Object.assign(new Error("sign in"), {signin: true});
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return r.json();
+}
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: {"Content-Type": "application/json", "X-Exo-V2V": "1"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  return d;
+}
+
+// ---------- actions (jobs.py: sync, rehearse, rehearsal destroy; never a cutover) ----------
+function cmdOf(a) {
+  const p = a.params || {}, g = a.kind === "group";
+  if (a.action === "sync") return (g ? ["group", "sync", a.target] : ["sync", a.target]).concat(g && p.consistent ? ["--consistent"].concat(p.quiesce ? ["--quiesce"] : []) : []);
+  if (a.action === "rehearse") return (g ? ["group", "rehearse", a.target] : ["rehearse", a.target]).concat(g && p.consistent ? ["--consistent"].concat(p.quiesce ? ["--quiesce"] : []) : []);
+  return ["rehearsal", "destroy", a.target];
+}
+function actionBar(kind, target, which) {
+  const can = which.filter(x => policy.actions.includes(x));
+  if (!can.length) return "";
+  const btn = (action, label, cls) => `<button class="act ${cls || ""}" data-action="${esc(action)}" data-kind="${esc(kind)}" data-target="${esc(target)}">${esc(label)}</button>`;
+  const opts = kind === "group" && can.some(x => x !== "rehearsal-destroy")
+    ? `<label><input type="checkbox" id="opt-consistent"> one point in time</label><label><input type="checkbox" id="opt-quiesce"> quiesce</label>` : "";
+  return `<div class="actions">${can.includes("sync") ? btn("sync", kind === "group" ? "Sync round now" : "Sync cycle now") : ""}
+    ${can.includes("rehearse") ? btn("rehearse", "Rehearse") : ""}${can.includes("rehearsal-destroy") ? btn("rehearsal-destroy", "Destroy rehearsal", "danger") : ""}${opts}</div>`;
+}
+async function onAction(b) {
+  const a = {action: b.dataset.action, kind: b.dataset.kind, target: b.dataset.target, params: {}};
+  const c = document.getElementById("opt-consistent"), q = document.getElementById("opt-quiesce");
+  if (a.kind === "group" && c && c.checked) { a.params.consistent = true; if (q && q.checked) a.params.quiesce = true; }
+  const cmd = "exo-v2v " + cmdOf(a).join(" ");
+  if (a.action === "rehearsal-destroy") {
+    if (prompt(`${cmd}\n\nType the rehearsal's name to destroy its copies, relay and networks:`) !== a.target) return;
+  } else if (!confirm(`Run on the appliance:\n\n${cmd}`)) return;
+  b.disabled = true;
+  try { const j = await post("/api/jobs", a); location.hash = `#/j/${enc(j.id)}`; }
+  catch (e) { alert(`${cmd}: ${e.message}`); b.disabled = false; }
+}
+function jobRows(js) {
+  return js.map(j => `<tr><td><a href="#/j/${enc(j.id)}">${esc(clock(j.created))}</a></td><td class="mono">${esc("exo-v2v " + j.argv.join(" "))}</td>
+    <td>${badge(j.state === "succeeded" ? "done" : j.state === "failed" || j.state === "lost" ? "failed" : "syncing", j.state)}</td>
+    <td class="muted">${esc(j.source)}${j.requester ? " · " + esc(j.requester) : ""}</td><td class="err">${esc(j.error || "")}</td></tr>`).join("");
+}
+const jobTable = rows => `<div class="panel scroll"><table><thead><tr><th>Started</th><th>Command</th><th>State</th><th>From</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+async function jobsOf(target) {
+  try { const d = await api(`/api/jobs?target=${enc(target)}`); return d.jobs.length ? `<h2>Jobs</h2>${jobTable(jobRows(d.jobs.slice(0, 8)))}` : ""; }
+  catch (e) { return ""; }
+}
+async function viewJob(id) {
+  const j = await api(`/api/jobs/${enc(id)}`), log = await api(`/api/jobs/${enc(id)}/log?lines=400`);
+  const live = j.state === "queued" || j.state === "running";
+  return `<div class="crumbs"><a href="#/">overview</a> · job</div>
+    <h1 class="mono">exo-v2v ${esc(j.argv.join(" "))}</h1>
+    <div class="crumbs">${badge(j.state === "succeeded" ? "done" : j.state === "failed" || j.state === "lost" ? "failed" : "syncing", j.state)}
+      started ${esc(clock(j.started || j.created))}${j.ended ? ` · took ${dur(j.ended - j.started)}` : ""} · from ${esc(j.source)}${j.requester ? " " + esc(j.requester) : ""}${j.unit ? ` · unit <span class="mono">${esc(j.unit)}</span>` : ""}</div>
+    ${j.error ? `<div class="panel pad err" style="margin-top:12px">${esc(j.error)}</div>` : ""}
+    ${live && j.action !== "rehearsal-destroy" && policy.actions.length ? `<div class="actions"><button class="act danger" data-cancel="${esc(j.id)}">Interrupt</button></div>` : ""}
+    <h2>Log</h2><div class="panel"><pre class="log" id="log">${esc(log.lines.join("\n") || "(empty)")}</pre></div>`;
+}
+function viewSignin(msg) {
+  return `<div class="panel pad signin"><h1>Sign in</h1><p class="muted">This page needs the token of <span class="mono">exo-v2v web</span>.</p>
+    <input type="password" id="token" autocomplete="current-password" placeholder="token"><button class="act" id="signin">Sign in</button>
+    ${msg ? `<p class="err">${esc(msg)}</p>` : ""}</div>`;
 }
 
 function lagging(m, d) {
@@ -145,7 +222,10 @@ function viewOverview(d) {
     <td class="num">${m.downtime_s != null ? dur(m.downtime_s) : '<span class="muted">–</span>'}</td></tr>`;
   const rows = live.map(row).join("") + (cleaned.length ? `<tr><td colspan="6"><a href="#" id="togglecleaned">${showCleaned ? "hide" : "show"} ${cleaned.length} cleaned-up migration(s)</a></td></tr>` : "")
     + (showCleaned ? cleaned.map(row).join("") : "");
-  return `<h1>Migrations on ${esc(d.host)}</h1><div class="crumbs">${esc(d.home)} · refreshed every 5 s</div>
+  const wan = d.wan || {};
+  const wanTxt = wan.error ? `<span class="err">WAN: ${esc(wan.error)}</span>` : `WAN ${wan.limit_bps ? Math.round(wan.limit_bps * 8 / 1e6) + " Mbit/s (" + esc(wan.source) + ")" : "unlimited"}${wan.compress && wan.compress !== "off" ? " · compression " + esc(wan.compress) : ""}`;
+  return `<h1>Migrations on ${esc(d.host)}</h1><div class="crumbs">${esc(d.home)} · ${wanTxt} · refreshed every 5 s</div>
+    ${d.jobs && d.jobs.length ? `<h2>Recent jobs</h2>${jobTable(jobRows(d.jobs))}` : ""}
     <h2>Groups</h2>${groups ? `<div class="cards">${groups}</div>` : '<div class="panel empty">no groups</div>'}
     ${(d.rehearsals || []).length ? `<h2>Rehearsals</h2><div class="cards">${d.rehearsals.map(rehearsalCard).join("")}</div>` : ""}
     <h2>Migrations</h2>${rows ? `<div class="panel scroll"><table><thead><tr><th>Migration</th><th class="hide-s">Group</th><th>Phase</th>
@@ -185,6 +265,7 @@ function viewRehearsal(r) {
   const ev = (r.events || []).slice().reverse().map(e => `<div><time>${esc(clock(e.t))}</time>${esc(e.msg)}</div>`).join("");
   return `<div class="crumbs"><a href="#/">overview</a> · rehearsal</div>
     <h1>${esc(r.name)} ${badge(r.state, "rehearsal " + r.state)} ${busy(r.busy)}</h1>
+    ${r.state !== "destroyed" ? actionBar("rehearsal", r.name, ["rehearsal-destroy"]) : ""}
     <div class="crumbs">relay <span class="mono">${esc(r.relay || "–")}</span> · ${ago(r.created)}${r.ttl ? " · " + esc(ttlLeft(r)) : ""}</div>
     <div class="airgap">The copies have no public IP and sit on isolated networks without a router: they reach nothing outside the rehearsal. People reach them through the relay only (SSH from ${(r.access || []).length ? r.access.map(esc).join(", ") + " and " : ""}the appliance): <span class="mono">exo-v2v rehearsal connect ${esc(r.name)}</span></div>
     ${r.error ? `<div class="panel pad err" style="margin-top:12px">${esc(r.error)}</div>` : ""}
@@ -227,6 +308,7 @@ function viewMigration(m) {
   const cyc = (m.cycles || []).slice(-12).reverse().map(c => `<tr><td>${esc(clock(c.t))}</td>
     <td>${c.final ? badge("cutover", "final") : esc([...new Set(Object.values(c.disks || {}).map(x => x.mode))].join(", "))}</td>
     <td class="num">${bytes(Object.values(c.disks || {}).reduce((a, x) => a + (x.covered || 0), 0))}</td>
+    <td class="num">${wire(c)}</td>
     <td class="num">${dur(c.seconds)}</td></tr>`).join("");
   const order = ["down_at", "source_off", "final_cycle", "verified", "convert_started", "converted", "flushed", "stopped", "scaled", "started"];
   const names = {down_at: "downtime starts", source_off: "source VM off", final_cycle: "final cycle copied", verified: "verified",
@@ -240,6 +322,8 @@ function viewMigration(m) {
   const ev = (m.events || []).slice().reverse().map(e => `<div><time>${esc(clock(e.t))}</time>${esc(e.msg)}</div>`).join("");
   return `<div class="crumbs"><a href="#/">overview</a>${m.group ? ` · group <a href="#/g/${enc(m.group)}">${esc(m.group)}</a>` : ""}</div>
     <h1>${esc(m.name)} ${badge(m.phase)} ${busy(m.busy)}</h1><div class="stepper">${stepper}</div>
+    ${m.elastic_ip || (m.dns || []).length ? `<div class="crumbs">${m.elastic_ip ? `Elastic IP <span class="mono">${esc(m.elastic_ip)}</span>` : ""}${(m.dns || []).map(d => ` · ${dnsText(d)}`).join("")}</div>` : ""}
+    ${!m.group && ["receiver-ready", "syncing"].includes(m.phase) ? actionBar("migration", m.name, ["sync", "rehearse"]) : ""}
     <div class="grid2" style="margin-top:12px">
       <div class="panel pad"><dl class="kv">
         <dt>source VM</dt><dd>${esc(p.vm)} <span class="muted">${esc(p.source.guest_full || p.guest_id)}</span></dd>
@@ -255,8 +339,12 @@ function viewMigration(m) {
     <h2>Disks</h2><div class="panel scroll"><table><thead><tr><th>Disk</th><th>Label</th><th class="num">Capacity</th><th>Role</th><th>Export</th><th class="num">On Exoscale</th></tr></thead><tbody>${disks}</tbody></table></div>
     ${nets ? `<h2>Networks</h2><div class="panel scroll"><table><thead><tr><th>Source NIC</th><th>Exoscale</th><th>Address</th><th>Guest config</th><th>Exoscale MAC</th></tr></thead><tbody>${nets}</tbody></table></div>` : ""}
     ${steps ? `<h2>Cutover</h2><div class="panel pad"><ul class="timeline">${steps}</ul></div>` : ""}
-    <h2>Recent cycles</h2>${cyc ? `<div class="panel scroll"><table><thead><tr><th>When</th><th>Kind</th><th class="num">Covered</th><th class="num">Took</th></tr></thead><tbody>${cyc}</tbody></table></div>` : '<div class="panel empty">no cycles yet</div>'}
+    <h2>Recent cycles</h2>${cyc ? `<div class="panel scroll"><table><thead><tr><th>When</th><th>Kind</th><th class="num">Covered</th><th class="num">Sent</th><th class="num">Took</th></tr></thead><tbody>${cyc}</tbody></table></div>` : '<div class="panel empty">no cycles yet</div>'}
     <h2>Events</h2><div class="panel pad events">${ev || '<span class="muted">none</span>'}</div>`;
+}
+
+function dnsText(d) {
+  return `DNS ${esc(d.fqdn)}: ${d.restored ? esc(d.old) + " (restored)" : d.switched ? "→ " + esc(d.new) + (d.served_s != null ? ` (served after ${dur(d.served_s)})` : "") : esc(d.old) + `, TTL ${dur(d.ttl)}`}`;
 }
 
 // ---------- group ----------
@@ -267,6 +355,7 @@ function groupSteps(g) {
     .concat(tiers.slice().reverse().map(t => [`tier${t}_off`, `tier ${t} off`]))
     .concat([["converted", "every member converted"]])
     .concat(tiers.map(t => [`tier${t}_up`, `tier ${t} up and healthy`]))
+    .concat((g.dns || []).length ? [["dns_switch", "DNS switched"]] : [])
     .concat([["post_hook", "post_cutover hook"]]);
   const t0 = st.stop_started;
   let seenCur = false;
@@ -301,8 +390,10 @@ function viewGroup(g) {
   const ls = g.last_sync;
   return `<div class="crumbs"><a href="#/">overview</a> · group</div>
     <h1>${esc(g.name)} ${cut.state ? badge(cut.state, "cutover " + cut.state) : badge("idle", "not cut over")} ${busy(g.busy)}</h1>
+    ${!cut.state ? actionBar("group", g.name, ["sync", "rehearse"]) : ""}
     ${g.rehearsal ? `<div class="airgap">Rehearsal ${badge(g.rehearsal.state)}: <a href="#/r/${enc(g.rehearsal.name)}">airgapped copies</a> through relay <span class="mono">${esc(g.rehearsal.relay || "–")}</span> · ${esc(ttlLeft(g.rehearsal))}</div>` : ""}
     <div class="crumbs">${esc(g.zone)} · ${g.members.length} members${ls ? ` · last sync round ${ago(ls.t)} (${dur(ls.seconds)}${Object.keys(ls.failed || {}).length ? `, <span class="err">failed: ${esc(Object.keys(ls.failed).join(", "))}</span>` : ""})` : ""}</div>
+    ${(g.dns || []).length ? `<div class="crumbs">${g.dns.map(dnsText).join(" · ")}</div>` : ""}
     ${cut.error ? `<div class="panel pad err" style="margin-top:12px">${esc(cut.error)}</div>` : ""}
     <div class="grid2" style="margin-top:14px">
       <div><h2 style="margin-top:0">Members</h2>${tierHtml}</div>
@@ -333,21 +424,38 @@ async function refresh() {
   const h = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   try {
     const o = await api("/api/overview");
+    policy = await api("/api/policy").catch(() => ({actions: []}));
+    document.getElementById("mode").textContent = policy.actions.length ? "actions on" : "read-only";
     document.getElementById("host").textContent = `${o.host} · exo-v2v ${o.version}`;
     document.getElementById("stamp").textContent = "updated " + new Date().toLocaleTimeString();
     const y = window.scrollY;
-    if (h[0] === "m" && h[1]) app.innerHTML = viewMigration(await api(`/api/migrations/${enc(h[1])}`));
-    else if (h[0] === "g" && h[1]) { app.innerHTML = viewGroup(await api(`/api/groups/${enc(h[1])}`)); await loadLog(h[1]); }
-    else if (h[0] === "r" && h[1]) app.innerHTML = viewRehearsal(await api(`/api/rehearsals/${enc(h[1])}`));
+    if (h[0] === "m" && h[1]) app.innerHTML = viewMigration(await api(`/api/migrations/${enc(h[1])}`)) + await jobsOf(h[1]);
+    else if (h[0] === "g" && h[1]) { app.innerHTML = viewGroup(await api(`/api/groups/${enc(h[1])}`)) + await jobsOf(h[1]); await loadLog(h[1]); }
+    else if (h[0] === "r" && h[1]) app.innerHTML = viewRehearsal(await api(`/api/rehearsals/${enc(h[1])}`)) + await jobsOf(h[1]);
+    else if (h[0] === "j" && h[1]) app.innerHTML = await viewJob(h[1]);
     else app.innerHTML = viewOverview(o);
     const tc = document.getElementById("togglecleaned");
     if (tc) tc.onclick = e => { e.preventDefault(); showCleaned = !showCleaned; refresh(); };
     window.scrollTo(0, y);
   } catch (e) {
-    app.innerHTML = `<div class="panel pad err">${esc(e.message)}</div><p><a href="#/">overview</a></p>`;
+    app.innerHTML = e.signin ? viewSignin() : `<div class="panel pad err">${esc(e.message)}</div><p><a href="#/">overview</a></p>`;
   }
 }
-function schedule() { clearInterval(timer); timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000); }
+app.addEventListener("click", async e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.action) return onAction(b);
+  if (b.dataset.cancel) {
+    if (!confirm("Interrupt this job? A sync finishes the cycle or round in progress first.")) return;
+    try { await post(`/api/jobs/${enc(b.dataset.cancel)}/cancel`, {}); refresh(); } catch (err) { alert(err.message); }
+  }
+  if (b.id === "signin") {
+    const r = await fetch("/login", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token: document.getElementById("token").value})});
+    if (r.ok) refresh(); else app.innerHTML = viewSignin("wrong token");
+  }
+});
+function schedule() { clearInterval(timer); timer = setInterval(() => { if (!document.hidden && !document.getElementById("token")) refresh(); }, 5000); }
 window.addEventListener("hashchange", () => { logState.follow = true; refresh(); window.scrollTo(0, 0); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 refresh(); schedule();

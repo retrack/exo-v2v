@@ -29,7 +29,7 @@ class Exo:
             cmd += ["--use-account", self.account]
         if json_out:
             cmd += ["-O", "json"]
-        if self.dry_run and args[1] not in ("show", "list"):
+        if self.dry_run and not {"show", "list"} & set(args[:3]):
             log(f"dry-run: {' '.join(cmd)}")
             return {}
         r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
@@ -246,6 +246,77 @@ class Exo:
 
     def sg_delete(self, name):
         return self.run("compute", "security-group", "delete", name, "-f", json_out=False)
+
+    # --- elastic IPs (zonal) ---
+    def eips(self):
+        return self.run("compute", "elastic-ip", "list", "-z", self.zone) or []
+
+    def eip(self, ip):
+        return self.run("compute", "elastic-ip", "show", ip, "-z", self.zone)
+
+    def eip_by_description(self, description):
+        for e in self.eips():
+            if e.get("description") == description:
+                return self.eip(e["ip_address"])
+        return None
+
+    def eip_create(self, description):
+        """A new manual Elastic IP; returns {"id", "ip_address", ...}, found by its
+        unique description. exo 1.103 updates the reverse DNS after every create
+        and, without a name, fails there ("operation is nil") with the address
+        already created: that error is not a failure."""
+        try:
+            self.run("compute", "elastic-ip", "create", "-z", self.zone, "--description", description)
+        except ExoError as e:
+            if "reverse dns" not in str(e):
+                raise
+        e = self.eip_by_description(description)
+        if not e:
+            raise ExoError(f"Elastic IP {description!r} not found after its creation")
+        return e
+
+    def eip_delete(self, ip):
+        return self.run("compute", "elastic-ip", "delete", ip, "-z", self.zone, "-f", json_out=False)
+
+    def eip_attach(self, instance, ip):
+        return self.run("compute", "instance", "elastic-ip", "attach", instance, ip, "-z", self.zone,
+                        json_out=False)
+
+    def eip_detach(self, instance, ip):
+        return self.run("compute", "instance", "elastic-ip", "detach", instance, ip, "-z", self.zone,
+                        json_out=False)
+
+    def eip_reverse_dns(self, ip, name):
+        return self.run("compute", "elastic-ip", "update", ip, "-z", self.zone, "--reverse-dns", name,
+                        json_out=False)
+
+    def instance_reverse_dns(self, instance, name):
+        return self.run("compute", "instance", "update", instance, "-z", self.zone, "--reverse-dns", name,
+                        json_out=False)
+
+    # --- DNS (Exoscale DNS; not zonal) ---
+    def dns_domains(self):
+        return [d["name"] for d in self.run("dns", "list") or [] if d.get("name")]
+
+    def dns_records(self, domain, name=None, rtype="A"):
+        """[{"id", "name", "type", "content", "ttl"}] of `domain` (name relative, "" = apex)."""
+        args = ["dns", "show", domain, rtype] + (["-n", name] if name else [])
+        out = []
+        for r in self.run(*args) or []:
+            rt = r.get("record_type") or r.get("type")
+            if rt != rtype or (name is not None and (r.get("name") or "") != name):
+                continue
+            out.append({"id": str(r.get("id")), "name": r.get("name") or "", "type": rt,
+                        "content": r.get("content"), "ttl": int(r.get("ttl") or 0)})
+        return out
+
+    def dns_update(self, domain, record_id, content=None, ttl=None):
+        args = ["dns", "update", "A", domain, record_id]
+        if content:
+            args += ["-c", content]
+        if ttl:
+            args += ["-t", str(int(ttl))]
+        return self.run(*args, json_out=False)
 
     def template_boot_mode(self, name, visibility="public"):
         t = self.run("compute", "instance-template", "show", name, "-z", self.zone,

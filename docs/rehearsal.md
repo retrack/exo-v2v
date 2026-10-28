@@ -1,6 +1,6 @@
 # Rehearsal
 
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 A rehearsal starts **copies** of the migrated VMs on Exoscale, converted exactly
 as the cutover would convert them, so that you can check the application before
@@ -34,6 +34,34 @@ exo-v2v rehearsal report  shop                    # refreshes the DNS log
 exo-v2v rehearsal destroy shop
 exo-v2v gc                                        # run hourly from cron: destroys expired rehearsals
 ```
+
+### One point in time (`--consistent`)
+
+By default each copy is seeded from its migration's last cycle, so members
+seeded minutes apart do not show one instant (an order in the application
+database that its server copy does not know yet). `--consistent` brings every
+member's replica to the same point first:
+
+```bash
+sudo -E exo-v2v group rehearse shop --consistent --quiesce      # --max-spread 30s fails above that
+```
+
+1. Every member's migration is locked (no timer or other sync moves a replica on).
+2. A normal catch-up cycle runs, so the next snapshots hold little.
+3. One snapshot per member, all requested before any is waited for; vCenter's
+   task times give the **spread** (first start to last completion). In our lab,
+   for 5 VMs including a Windows server: 13 s, and 44 s with `--quiesce` (most
+   of it Windows VSS). The report shows when each member's snapshot ended.
+4. Each member copies from its snapshot, then its copy is seeded before the
+   lock is released.
+
+`--quiesce` asks VMware Tools to quiesce each VM (VSS on Windows, the freeze
+scripts and `fsfreeze` on Linux): each copy is then application-consistent on
+its own. A VM that cannot quiesce gets a crash-consistent snapshot and the
+report says why; `--quiesce=strict` fails instead. Without `--quiesce` the set
+is crash-consistent within the spread, like a power cut of all members at once.
+The report and the web page show the point, the spread and the quiesce result.
+`group sync --consistent` takes the same kind of point without a rehearsal.
 
 A group's settings live in its manifest; a single migration takes them as
 options (`--access`, `--ssh-key`, `--ttl`, `--front-cidr`, `--host`, and
@@ -103,9 +131,10 @@ Every step is recorded: after an interruption, run the same command again.
   server, and only these templates read it. A rehearsal cannot use the
   stock-template receiver (it installs packages from the internet).
 - Each copy is crash-consistent at its own seed time; members seeded minutes
-  apart are not consistent with one another at one instant.
-- Not rehearsed: what needs the public side (public IP and DNS switch, security
-  groups on the public interface) and anything that needs the internet or your
+  apart are not consistent with one another at one instant, unless you use
+  `--consistent` (above).
+- Not rehearsed: what needs the public side (public IP, [Elastic IPs and DNS
+  switch](public.md), security groups on the public interface) and anything that needs the internet or your
   on-premises systems (they fail by design; the DNS log shows what was tried).
 - **Windows copies**: the replica of a running Windows has an unclean NTFS
   journal, which the conversion cannot mount read-write. On the copy only,

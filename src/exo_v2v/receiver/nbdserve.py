@@ -20,6 +20,7 @@ import socket
 import struct
 import sys
 import threading
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bootmask  # noqa: E402
@@ -102,7 +103,9 @@ def send_opt_reply(sock, opt, rtype, data=b""):
     sock.sendall(struct.pack(">QIII", P.REPLY_MAGIC, opt, rtype, len(data)) + data)
 
 
-def negotiate(sock, exports):
+def negotiate(sock, exports, caps=None):
+    """The export the client chose; `caps` (a dict) gets the extensions it asked for."""
+    caps = {} if caps is None else caps
     sock.sendall(struct.pack(">QQH", P.NBDMAGIC, P.IHAVEOPT,
                              P.FLAG_FIXED_NEWSTYLE | P.FLAG_NO_ZEROES))
     (cflags,) = struct.unpack(">I", P.recv_exact(sock, 4))
@@ -138,10 +141,17 @@ def negotiate(sock, exports):
                 send_opt_reply(sock, opt, P.REP_SERVER, struct.pack(">I", len(n)) + n)
             send_opt_reply(sock, opt, P.REP_ACK)
             continue
+        if opt == P.OPT_EXO_ZLIB and data == b"zlib":
+            caps["zlib"] = True
+            send_opt_reply(sock, opt, P.REP_ACK)
+            continue
         if opt == P.OPT_ABORT:
             send_opt_reply(sock, opt, P.REP_ACK)
             raise ConnectionError("client aborted")
         send_opt_reply(sock, opt, P.REP_ERR_UNSUP)
+
+
+KNOWN = {P.CMD_READ, P.CMD_WRITE, P.CMD_FLUSH, P.CMD_TRIM, P.CMD_WRITE_ZEROES, P.CMD_EXO_ZWRITE}
 
 
 def reply(sock, cookie, err=0, data=b""):
@@ -150,9 +160,20 @@ def reply(sock, cookie, err=0, data=b""):
         sock.sendall(data)
 
 
-def serve_conn(sock, addr, exports):
+def inflate(payload, length):
+    """The `length` bytes of a zlib stream, or None if it is not exactly that."""
+    d = zlib.decompressobj()
     try:
-        exp = negotiate(sock, exports)
+        raw = d.decompress(payload, length)
+    except zlib.error:
+        return None
+    return raw if len(raw) == length and d.eof and not d.unconsumed_tail and not d.unused_data else None
+
+
+def serve_conn(sock, addr, exports):
+    caps = {}
+    try:
+        exp = negotiate(sock, exports, caps)
         log.info("%s connected to export %s (%s, %d bytes)", addr, exp.name, exp.path, exp.size)
         while True:
             magic, flags, cmd, cookie, offset, length = struct.unpack(
@@ -161,13 +182,35 @@ def serve_conn(sock, addr, exports):
                 raise ConnectionError("bad request magic")
             if cmd == P.CMD_DISC:
                 break
+            if cmd not in KNOWN:
+                # its payload (if any) cannot be skipped: the stream would be out of step
+                reply(sock, cookie, P.EINVAL)
+                raise ConnectionError(f"unknown command {cmd}")
+            zdata = None
+            if cmd == P.CMD_EXO_ZWRITE:
+                (clen,) = struct.unpack(">I", P.recv_exact(sock, 4))
+                if clen > P.MAX_REQUEST + P.ZWRITE_SLACK:
+                    reply(sock, cookie, P.EINVAL)
+                    raise ConnectionError(f"compressed write of {clen} bytes")
+                zdata = P.recv_exact(sock, clen)
             # the payload cap applies to data-carrying commands only (NBD spec);
             # WRITE_ZEROES/TRIM may cover any range inside the export
-            too_big = length > P.MAX_REQUEST and cmd in (P.CMD_READ, P.CMD_WRITE)
-            if too_big or offset + length > exp.size:
+            too_big = length > P.MAX_REQUEST and cmd in (P.CMD_READ, P.CMD_WRITE, P.CMD_EXO_ZWRITE)
+            if too_big or offset + length > exp.size or (zdata is not None and not caps.get("zlib")):
                 if cmd == P.CMD_WRITE:
                     P.recv_exact(sock, length)
                 reply(sock, cookie, P.EINVAL)
+                continue
+            if zdata is not None:
+                data = inflate(zdata, length)
+                if data is None or exp.readonly:
+                    reply(sock, cookie, P.EIO if data is None else P.EINVAL)
+                    continue
+                exp.pwrite(data, offset)
+                exp.bytes_written += length
+                if flags & 1:  # FUA
+                    exp.fsync()
+                reply(sock, cookie)
                 continue
             if cmd == P.CMD_READ:
                 reply(sock, cookie, 0, exp.pread(length, offset))
@@ -191,8 +234,6 @@ def serve_conn(sock, addr, exports):
                 reply(sock, cookie)
             elif cmd == P.CMD_TRIM:
                 reply(sock, cookie)
-            else:
-                reply(sock, cookie, P.EINVAL)
     except (ConnectionError, OSError) as e:
         log.info("%s disconnected: %s", addr, e)
     finally:

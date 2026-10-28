@@ -59,6 +59,27 @@
         {
           "action": "allow",
           "expression": "operation == 'attach-instance-to-security-group'"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'create-elastic-ip' && parameters.description.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation in ['attach-instance-to-elastic-ip', 'detach-instance-from-elastic-ip', 'update-reverse-dns-elastic-ip', 'delete-elastic-ip'] && resources.elastic_ip.description.startsWith('v2v-')"
+        },
+        {
+          "action": "allow",
+          "expression": "operation == 'update-reverse-dns-instance' && resources.instance.name.startsWith('v2v-')"
+        }
+      ]
+    },
+    "dns": {
+      "type": "rules",
+      "rules": [
+        {
+          "action": "allow",
+          "expression": "operation in ['list-dns-domains', 'get-dns-domain', 'list-dns-domain-records', 'get-dns-domain-record', 'update-dns-domain-record']"
         }
       ]
     }

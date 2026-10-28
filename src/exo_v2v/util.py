@@ -52,3 +52,17 @@ def write_json_atomic(path, obj):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+
+
+def transfer(cycle):
+    """', 310 MiB sent (compressed x0.31), throttled 40s' for a cycle's disks, or ''."""
+    d = list((cycle or {}).get("disks", {}).values())
+    sent, wire = sum(x.get("sent", 0) for x in d), sum(x.get("wire", x.get("sent", 0)) for x in d)
+    throttled = sum(x.get("throttled_s", 0) for x in d)
+    out = ""
+    if any(str(x.get("compression", "")).startswith("zlib") for x in d) and sent:
+        out += f", {human(wire)} sent (compressed x{wire / sent:.2f})"
+    if throttled >= 1:
+        out += f", throttled {throttled:.0f}s"
+    return out
+

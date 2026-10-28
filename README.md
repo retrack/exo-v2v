@@ -1,7 +1,7 @@
 # exo-v2v — warm migration of VMware vSphere VMs to Exoscale
 
 > [!WARNING]
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 `exo-v2v` moves a running VMware VM to an Exoscale Compute instance with a
 downtime of minutes, regardless of disk size:
@@ -29,9 +29,11 @@ No VDDK, no vSphere plugin, no agent inside the guest, no staging storage.
 | Filesystems | ext, XFS (including 512-byte-sector XFS, the RHEL default on VMware), NTFS, swap; partition tables GPT and MBR |
 | Replication | Changed Block Tracking, VDDK-free, through a replication appliance in vSphere; several migrations at once from one appliance |
 | **Applications** | A [group](docs/groups.md) of VMs (load balancer, application servers, databases) replicated together and cut over in one window: stopped front to back, converted in parallel, started back to front with health checks, rolled back as a whole |
-| Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses, the guest's network configuration follows the new NICs |
-| **Rehearsal** | Copies of the VMs started from their replicas, converted as at cutover, [**airgapped**](docs/rehearsal.md) (no public IP, isolated networks, no router) and reachable only by SSH through a relay; health checks, a predicted cutover window, the outside names the copies tried to resolve; the sources and replication carry on |
-| Status page | A read-only [web page](docs/web.md) on the appliance with every migration and group |
+| Networks | Each vSphere port group maps to the public interface or an Exoscale private network; VMs keep their private addresses (or get new ones), the guest's network configuration follows the new NICs |
+| **Rehearsal** | Copies of the VMs started from their replicas, converted as at cutover, [**airgapped**](docs/rehearsal.md) (no public IP, isolated networks, no router) and reachable only by SSH through a relay; health checks, a predicted cutover window, the outside names the copies tried to resolve; optionally every member at one point in time (quiesced); the sources and replication carry on |
+| **Public side** | [Elastic IPs](docs/public.md) reserved before the window and configured in the guest (Linux and Windows), reverse DNS, DNS records on Exoscale DNS switched once the application is healthy and put back by a rollback, renumbered private addresses, security group rules between groups |
+| WAN | One [bandwidth limit](docs/OPERATIONS.md#bandwidth-limit-schedule-compression) for the whole appliance with a weekly schedule, zlib compression of the copy stream |
+| Status page | A [web page](docs/web.md) on the appliance with every migration and group; optional [actions](docs/api.md) (sync, rehearse) with a token, never a cutover; a read-only [MCP server](docs/api.md#mcp-server) for AI assistants |
 | vCenter | VMs by name, inventory path or UUID; groups from a [folder or a tag](docs/vcenter.md); `plan` checks the account's privileges, the appliance's datastores and DRS |
 | Unattended | Replication on systemd timers, [webhook alerts](docs/OPERATIONS.md#unattended-timers-and-alerts) (failing or lagging replication, a target that restarted, cutovers); a target that restarts boots nothing and is recovered with one command |
 | Not supported | Independent disks, raw device mappings, encrypted disks, Windows dynamic disks and Storage Spaces as data disks ([limitations](docs/limitations.md)) |
@@ -51,7 +53,9 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 | [Limitations](docs/limitations.md) | Known limits and their workarounds |
 | [Moving an application](docs/groups.md) | Groups: the manifest, private networks, the coordinated cutover, rollback |
 | [Rehearsal](docs/rehearsal.md) | Airgapped copies of the VMs to check before the cutover |
-| [Web status page](docs/web.md) | The read-only status page and its API |
+| [Web status page](docs/web.md) | The status page and its API |
+| [Public IPs and DNS](docs/public.md) | Elastic IPs, reverse DNS, DNS records, renumbering, security group rules |
+| [Actions, API and MCP](docs/api.md) | Starting syncs and rehearsals from the page or its API; the read-only MCP server |
 | [Operations runbook](docs/OPERATIONS.md) | Step-by-step migration, rollback, troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Design details for contributors |
 | [Project status](docs/status.md) | What is tested, and what it takes to drop the "Experimental" label |
@@ -68,8 +72,8 @@ Read it at **https://retrack.github.io/exo-v2v/**, or in [`docs/`](docs/):
 ## Install
 
 ```bash
-pipx install https://github.com/retrack/exo-v2v/releases/download/v0.5.0/exo_v2v-0.5.0-py3-none-any.whl
-# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.5.0   (pulls pyvmomi)
+pipx install https://github.com/retrack/exo-v2v/releases/download/v0.6.0/exo_v2v-0.6.0-py3-none-any.whl
+# or from source: pipx install git+https://github.com/retrack/exo-v2v@v0.6.0   (pulls pyvmomi)
 exo config                          # Exoscale credentials for the exo CLI
 export VSPHERE_HOST=vcenter.example VSPHERE_USER=migration@vsphere.local VSPHERE_PASSWORD=…
 ```
@@ -156,7 +160,8 @@ Live migrations from ESXi 7.0 U3 to ch-gva-2 (VM running during replication):
 - 1 root disk + up to 5 data volumes per instance; root disk ≥ 10 GB. Disks
   carried inside the root disk (`--fold`) do not count.
 - A single migration gets one public NIC. In a [group](docs/groups.md), each port group maps to
-  the public interface or an Exoscale managed private network (addresses kept); no Elastic IPs, no VPC yet.
+  the public interface or an Exoscale managed private network (addresses kept or renumbered); Elastic IPs
+  and Exoscale DNS records are handled ([Public IPs and DNS](docs/public.md)); no VPC yet.
 - Windows data volumes must use NTFS clusters ≥ 4 KiB (the default); smaller
   clusters cannot be expressed in 4096-byte sectors. Windows **dynamic disks**
   and Storage Spaces disks are not supported as data disks (detected, left

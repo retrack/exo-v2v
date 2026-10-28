@@ -170,3 +170,18 @@ def test_group_discover_writes_paths_for_ambiguous_names(sim, tmp_path, capsys):
     with pytest.raises(SystemExit):
         group.load_manifest(str(tmp_path / "g2.yaml"))
     assert "same name" in capsys.readouterr().err
+
+
+def test_snapshot_many_sweep_keep_and_remove(sim):
+    vms = [sim["web0"], sim["db0"]]
+    name = "v2v-sync-cg-shop-1"
+    out, spread = V.snapshot_many(vms, name, quiesce=True)
+    assert set(out) == {"web01", "db01"} and spread >= 0
+    assert all(set(v) == {"quiesced", "reason", "start", "end"} for v in out.values())
+    snaps = lambda vm: [s.name for s in V._walk_snaps(vm.snapshot.rootSnapshotList)] if vm.snapshot else []
+    wait(sim["web0"].CreateSnapshot_Task("v2v-sync-123", "stale", False, False))
+    done = V.sweep(sim["vc"], sim["web0"], None, keep=name)          # a cycle copying from the point
+    assert done == ["removed stale snapshot v2v-sync-123"] and snaps(sim["web0"]) == [name]
+    assert V.remove_named(sim["db0"], name) == 1 and snaps(sim["db0"]) == []
+    V.sweep(sim["vc"], sim["web0"], None)                            # the next sweep takes it too
+    assert snaps(sim["web0"]) == []

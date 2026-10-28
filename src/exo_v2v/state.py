@@ -5,12 +5,27 @@ can always say where a migration stands.
 """
 import json
 import os
+import re
 import time
 
 from .util import write_json_atomic
 
 PHASES = ["planned", "receiver-creating", "receiver-ready", "syncing", "cutover", "converted",
           "done", "rolled-back", "cleaned"]
+
+
+RESERVED = {"groups", "rehearsals", "jobs", "config.yaml", "alerts.json"}   # entries of home() itself
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+
+
+class BadName(ValueError):
+    pass
+
+
+def check_name(name):
+    if not NAME_RE.match(name) or name in RESERVED:
+        raise BadName(f"invalid migration name {name!r}: letters, digits, '.', '_', '-' "
+                              f"(and not {', '.join(sorted(RESERVED))})")
 
 
 def home():
@@ -26,6 +41,7 @@ class State:
 
     @classmethod
     def new(cls, name, plan):
+        check_name(name)
         st = cls(name)
         if os.path.exists(st.path):
             raise FileExistsError(f"migration {name!r} already exists ({st.path})")

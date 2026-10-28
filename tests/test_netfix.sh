@@ -129,4 +129,44 @@ grep -q '^IPADDR=10.20.0.31' $S/network-scripts/ifcfg-eth1 2>/dev/null && grep -
 grep -q '^DEFROUTE=no' $S/network-scripts/ifcfg-eth1 && ! grep -q GATEWAY $S/network-scripts/ifcfg-eth1 $S/network && ok "no gateway, DEFROUTE=no" || bad "gateway: $(cat $S/network-scripts/ifcfg-eth1 $S/network)"
 grep -q '^BOOTPROTO=dhcp' $S/network-scripts/ifcfg-eth0 2>/dev/null && ok "ifcfg-eth0 DHCP (public)" || bad "eth0: $(cat $S/network-scripts/ifcfg-eth0 2>&1)"
 
+# ---- 0.6: renumbering (from=OLD) and Elastic IP lines ----
+remap() { mkdir -p "$1/root/etc"; printf '%s dhcp\n%s eip 203.0.113.3/32\n%s static %s nogw from=%s\n' "$A" "$A" "$B" "$2" "$3" > "$1/root/etc/v2v-netfix.map"; }
+
+echo "== renumber: debian ifupdown 10.20.0.254 -> 10.20.0.54"; T=$W/rdeb; mkdir -p $T/root/etc/network/interfaces.d; nicm $T ens3 $A; nicm $T ens4 $B
+remap $T 10.20.0.54/24 10.20.0.254
+cat > $T/root/etc/network/interfaces <<'EOF'
+source /etc/network/interfaces.d/*
+auto lo
+iface lo inet loopback
+allow-hotplug ens192
+iface ens192 inet dhcp
+allow-hotplug ens224
+iface ens224 inet static
+    address 10.20.0.254/24
+EOF
+printf '127.0.0.1 localhost\n10.20.0.254 db01.lan db01\n10.20.0.2540 not-this\n' > $T/root/etc/hosts
+run $T; F=$T/root/etc/network/interfaces
+awk '/^iface ens4/{s=1} s&&/address 10.20.0.54\/24/{print "y"; exit}' $F | grep -q y && ok "address renumbered on ens4" || bad "$(cat $F)"
+grep -q '10.20.0.254/' $F && bad "old address left" || ok "old address gone"
+grep -q '^10.20.0.54 db01.lan db01$' $T/root/etc/hosts && grep -q '^10.20.0.2540 not-this$' $T/root/etc/hosts && ok "/etc/hosts: own name renumbered, longer address untouched" || bad "hosts: $(cat $T/root/etc/hosts)"
+grep -q '^iface ens3 inet dhcp$' $F && ! ls $T/root/etc/network/interfaces.d/ | grep -q ens3 && ok "eip line: public NIC still the DHCP one, no extra config" || bad "public: $(cat $F; ls $T/root/etc/network/interfaces.d)"
+cp $F $W/rdeb1; run $T; cmp -s $W/rdeb1 $F && ok "idempotent" || bad "second run changed config"
+
+echo "== renumber: netplan, NM keyfile, ifcfg, networkd"; T=$W/rmix; mkdir -p $T/root/etc/netplan; nicm $T ens3 $A; nicm $T ens4 $B
+remap $T 172.16.5.21/24 10.20.0.21
+printf 'network:\n  version: 2\n  ethernets:\n    ens192:\n      addresses:\n        - 10.20.0.21/24\n' > $T/root/etc/netplan/50-cloud-init.yaml
+run $T; python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1]))['network']['ethernets']; assert d['ens4']['addresses']==['172.16.5.21/24'], d" $T/root/etc/netplan/50-cloud-init.yaml && ok "netplan renumbered on ens4" || bad "$(cat $T/root/etc/netplan/50-cloud-init.yaml)"
+T=$W/rnm; K=$T/root/etc/NetworkManager/system-connections; mkdir -p $K; nicm $T eth0 $A; nicm $T eth1 $B; remap $T 172.16.5.31/24 10.20.0.31
+printf '[connection]\nid=ens192\ntype=ethernet\ninterface-name=ens192\n[ipv4]\nmethod=manual\naddress1=10.20.0.31/24,10.20.0.1\n' > $K/ens192.nmconnection
+run $T; grep -q '^address1=172.16.5.31/24$' $K/ens192.nmconnection && grep -q '^interface-name=eth1$' $K/ens192.nmconnection && ok "NM keyfile renumbered on eth1" || bad "$(cat $K/ens192.nmconnection)"
+T=$W/rifcfg; S=$T/root/etc/sysconfig/network-scripts; mkdir -p $S; nicm $T eth0 $A; nicm $T eth1 $B; remap $T 172.16.5.41/24 10.20.0.41
+printf 'DEVICE=ens192\nBOOTPROTO=none\nIPADDR=10.20.0.41\nPREFIX=24\nONBOOT=yes\n' > $S/ifcfg-ens192
+run $T; grep -q '^IPADDR=172.16.5.41$' $S/ifcfg-eth1 2>/dev/null && ok "ifcfg renumbered on eth1" || bad "$(ls $S; cat $S/*)"
+T=$W/rnd; N=$T/root/etc/systemd/network; mkdir -p $N; nicm $T ens3 $A; nicm $T ens4 $B; remap $T 172.16.5.51/24 10.20.0.51
+printf '[Match]\nName=ens192\n[Network]\nAddress=10.20.0.51/24\n' > $N/10-lan.network
+printf '[Match]\nName=ens160\n[Network]\nDHCP=yes\n' > $N/05-wan.network
+run $T; grep -q '^Address=172.16.5.51/24$' $N/10-lan.network && ok "networkd renumbered" || bad "$(cat $N/*)"
+grep -q '^Name=ens4$' $N/10-lan.network && grep -q '^Name=ens3$' $N/05-wan.network && ! ls $N | grep -q 90-v2v && ok "networkd: static -> ens4, DHCP -> ens3, nothing added" || bad "networkd names: $(head -n2 $N/*)"
+printf '[Match]\nName=en*\n[Network]\nDHCP=yes\n' > $N/99-glob.network; run $T; grep -q '^Name=en\*$' $N/99-glob.network && ok "networkd glob Name= left alone" || bad "glob: $(cat $N/99-glob.network)"
+
 [ $fail = 0 ] && echo PASS || { echo FAILED; exit 1; }

@@ -1,6 +1,6 @@
 # IAM role for the replication appliance
 
-> **Experimental.** exo-v2v 0.5.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
+> **Experimental.** exo-v2v 0.6.0 is an early release, validated in one lab (ESXi 7.0 U3 to Exoscale ch-gva-2). Try it on non-critical VMs first; commands and behaviour may change.
 
 The replication appliance calls the Exoscale API through the `exo` CLI. Give it
 an API key bound to a dedicated role, not your account's own key.
@@ -50,6 +50,10 @@ checked `parameters.labels`, while rules on names worked.
 | 12 | Creating `exo-v2v-*` and `v2v-*` security groups |
 | 13 | Adding and deleting rules, deleting, and detaching instances from `exo-v2v-*` and `v2v-*` security groups |
 | 14 | Attaching an instance to a security group (cutover attaches the groups you name in `plan --security-group` or in a group manifest) |
+| 15 | Creating Elastic IPs whose description starts with `v2v-` (`--elastic-ip new`) |
+| 16 | Attaching, detaching, setting the reverse DNS of, and deleting `v2v-*` Elastic IPs (by description: an Elastic IP you bring needs a description starting with `v2v-`, or a rule of your own) |
+| 17 | Setting the reverse DNS of a `v2v-*` instance |
+| 18 | DNS: reading domains and records, updating records (the [DNS switch](public.md#dns-records)); no domain or record is created or deleted. Narrow it to your domains, or drop it if you do not switch DNS with exo-v2v |
 
 Everything else is denied, including every other Exoscale service. The
 operations in the rules are the ones exo-v2v calls through `exo` 1.103:
@@ -68,6 +72,12 @@ that operation) and `delete-block-storage-snapshot` for rehearsals. 0.4.1 adds
 `delete-rule-from-security-group`: a receiver's security group allows no egress until the
 cutover, which removes that rule before it stops the source (without the permission the cutover
 stops there, with nothing stopped).
+
+0.6.0 adds rules 15 to 18 (Elastic IPs, reverse DNS, DNS records). They follow
+the operation names of the Exoscale API but were not yet exercised under a
+restricted key in our lab (the lab ran them with an unrestricted one): if a
+call is refused, the command stops with `Forbidden` before anything else
+changes, and the rule to widen is the one above.
 
 To update an existing role: `exo iam role update exo-v2v-appliance --policy - < docs/iam/exo-v2v-appliance-policy.json`.
 

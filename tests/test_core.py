@@ -663,3 +663,67 @@ def test_agent_skips_the_nocloud_drive(tmp_path, monkeypatch):
     monkeypatch.setattr(agent.os.path, "exists", lambda p: p.endswith("/serial"))
     assert agent.disks() == ["/dev/vda", "/dev/vdc"]
     assert agent.root_disk() == "/dev/vda"
+
+
+def test_migration_names(tmp_path, monkeypatch):
+    from exo_v2v import state
+    monkeypatch.setenv("EXO_V2V_HOME", str(tmp_path))
+    for bad in ("groups", "rehearsals", "jobs", "../x", "a/b", "", ".hidden", "x" * 70):
+        with pytest.raises(state.BadName):
+            state.State.new(bad, {})
+    assert state.State.new("web01.prod_A-2", {}).name == "web01.prod_A-2"
+
+
+def test_vsphere_keepalive():
+    import threading
+    import time
+    from exo_v2v import vsphere
+    calls = []
+
+    class SI:
+        def CurrentTime(self):
+            calls.append(1)
+            if len(calls) == 2:
+                raise ConnectionError("blip")      # logged, the thread goes on
+
+    vc = vsphere.VC.__new__(vsphere.VC)
+    vc.si, vc._stop = SI(), threading.Event()
+    t = threading.Thread(target=vc._keepalive, args=(0.01,), daemon=True)
+    t.start()
+    time.sleep(0.2)
+    vc._stop.set()
+    t.join(1)
+    assert len(calls) >= 3 and not t.is_alive()
+
+
+def test_lock_fd_is_shared_with_a_child(tmp_path, monkeypatch):
+    """--lock-fd: a group process hands its migration lock to the member's
+    process; the lock stays held while either lives, never released by the child."""
+    import fcntl
+    import json
+    from exo_v2v import state
+    monkeypatch.setenv("EXO_V2V_HOME", str(tmp_path))
+    st = state.State.new("m1", {})
+    lk = open(os.path.join(st.dir, ".lock"), "a+")
+    fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    lk.write(json.dumps({"pid": os.getpid(), "what": "consistent point"}))
+    lk.flush()
+    src = os.path.join(os.path.dirname(__file__), "..", "src")
+    code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from exo_v2v import cli, state\n"
+            "st = state.State.load('m1'); cli.migration_lock(st, 'sync', int(sys.argv[2]))\n"
+            "print('held', flush=True); time.sleep(1.5)")
+    child = subprocess.Popen([sys.executable, "-c", code, src, str(lk.fileno())], pass_fds=(lk.fileno(),),
+                             stdout=subprocess.PIPE, text=True, env=dict(os.environ, EXO_V2V_HOME=str(tmp_path)))
+    assert child.stdout.readline().strip() == "held"
+    lk.close()                                        # the group process lets go: the child still holds it
+    other = open(os.path.join(st.dir, ".lock"), "a+")
+    with pytest.raises(BlockingIOError):
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert child.wait() == 0
+    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)  # both gone: free
+    assert json.load(open(os.path.join(st.dir, ".lock")))["what"] == "consistent point"   # holder kept
+    other.close()
+    wrong = open(tmp_path / "other", "w")
+    r = subprocess.run([sys.executable, "-c", code, src, str(wrong.fileno())], pass_fds=(wrong.fileno(),),
+                       capture_output=True, text=True, env=dict(os.environ, EXO_V2V_HOME=str(tmp_path)))
+    assert r.returncode and "is not the lock of m1" in r.stderr
